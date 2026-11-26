@@ -1,0 +1,35 @@
+{
+  "name": "block-basic-stacking-with-box-model",
+  "viewportWidth": 600,
+  "tolerance": 0.5,
+  "root": {
+    "id": "container",
+    "style": {
+      "display": "block",
+      "padding": 20,
+      "border": 2
+    },
+    "expected": { "x": 0, "y": 0, "width": 600, "height": 174 },
+    "children": [
+      {
+        "id": "header",
+        "style": {
+          "display": "block",
+          "height": 50,
+          "margin": { "top": 0, "right": 0, "bottom": 10, "left": 0 }
+        },
+        "expected": { "x": 22, "y": 22, "width": 556, "height": 50 }
+      },
+      {
+        "id": "card",
+        "style": {
+          "display": "block",
+          "width": 300,
+          "height": 70,
+          "margin": { "top": 0, "right": 0, "bottom": 0, "left": 16 }
+        },
+        "expected": { "x": 38, "y": 82, "width": 300, "height": 70 }
+      }
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "block-sibling-margin-collapse",
+  "viewportWidth": 500,
+  "tolerance": 0.5,
+  "root": {
+    "id": "wrapper",
+    "style": {
+      "display": "block"
+    },
+    "expected": { "x": 0, "y": 0, "width": 500, "height": 115 },
+    "children": [
+      {
+        "id": "first",
+        "style": {
+          "display": "block",
+          "height": 40,
+          "margin": { "top": 0, "right": 0, "bottom": 25, "left": 0 }
+        },
+        "expected": { "x": 0, "y": 0, "width": 500, "height": 40 }
+      },
+      {
+        "id": "second",
+        "style": {
+          "display": "block",
+          "height": 50,
+          "margin": { "top": 15, "right": 0, "bottom": 0, "left": 0 }
+        },
+        "expected": { "x": 0, "y": 65, "width": 500, "height": 50 }
+      }
+    ]
+  }
+}
