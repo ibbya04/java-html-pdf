@@ -38,6 +38,10 @@ final class FlexLayout {
         final float mainMarginEnd;
         final float crossMarginStart;
         final float crossMarginEnd;
+        final boolean mainMarginStartAuto;
+        final boolean mainMarginEndAuto;
+        final boolean crossMarginStartAuto;
+        final boolean crossMarginEndAuto;
         final float baseMainSize;
         final float minMainSize;
         final float maxMainSize;
@@ -53,6 +57,10 @@ final class FlexLayout {
             this.mainMarginEnd = isRow ? m.right() : m.bottom();
             this.crossMarginStart = isRow ? m.top() : m.left();
             this.crossMarginEnd = isRow ? m.bottom() : m.right();
+            this.mainMarginStartAuto = isRow ? style.marginLeftAuto() : style.marginTopAuto();
+            this.mainMarginEndAuto = isRow ? style.marginRightAuto() : style.marginBottomAuto();
+            this.crossMarginStartAuto = isRow ? style.marginTopAuto() : style.marginLeftAuto();
+            this.crossMarginEndAuto = isRow ? style.marginBottomAuto() : style.marginRightAuto();
             this.baseMainSize = baseMainSize;
             this.minMainSize = minMainSize;
             this.maxMainSize = maxMainSize;
@@ -226,38 +234,46 @@ final class FlexLayout {
                 }
             }
 
-            // Compute main-axis justification offsets
+            // Compute main-axis justification & auto-margins
             float sumFinalOuter = 0f;
-            for (FlexItem item : line) sumFinalOuter += item.outerTargetMain();
+            int mainAutoMargins = 0;
+            for (FlexItem item : line) {
+                sumFinalOuter += item.outerTargetMain();
+                if (item.mainMarginStartAuto) mainAutoMargins++;
+                if (item.mainMarginEndAuto) mainAutoMargins++;
+            }
             float remainingMain = availableMain != null ? (availableMain - sumFinalOuter - totalGaps) : 0f;
             maxLineMainUsed = Math.max(maxLineMainUsed, sumFinalOuter + totalGaps);
+
+            float autoMarginSpace = (mainAutoMargins > 0 && remainingMain > 0f) ? (remainingMain / mainAutoMargins) : 0f;
+            float justifyRemaining = (mainAutoMargins > 0 && remainingMain > 0f) ? 0f : remainingMain;
 
             float mainCursor;
             float itemGap = mainGap;
             int n = line.size();
             switch (flex.justifyContent()) {
-                case FLEX_END -> mainCursor = remainingMain;
-                case CENTER -> mainCursor = remainingMain / 2f;
+                case FLEX_END -> mainCursor = justifyRemaining;
+                case CENTER -> mainCursor = justifyRemaining / 2f;
                 case SPACE_BETWEEN -> {
                     mainCursor = 0f;
-                    if (n > 1 && remainingMain > 0f) itemGap = mainGap + (remainingMain / (n - 1));
+                    if (n > 1 && justifyRemaining > 0f) itemGap = mainGap + (justifyRemaining / (n - 1));
                 }
                 case SPACE_AROUND -> {
-                    if (remainingMain > 0f) {
-                        float step = remainingMain / n;
+                    if (justifyRemaining > 0f) {
+                        float step = justifyRemaining / n;
                         mainCursor = step / 2f;
                         itemGap = mainGap + step;
                     } else {
-                        mainCursor = remainingMain / 2f;
+                        mainCursor = justifyRemaining / 2f;
                     }
                 }
                 case SPACE_EVENLY -> {
-                    if (remainingMain > 0f) {
-                        float step = remainingMain / (n + 1);
+                    if (justifyRemaining > 0f) {
+                        float step = justifyRemaining / (n + 1);
                         mainCursor = step;
                         itemGap = mainGap + step;
                     } else {
-                        mainCursor = remainingMain / 2f;
+                        mainCursor = justifyRemaining / 2f;
                     }
                 }
                 default -> mainCursor = 0f;
@@ -267,27 +283,40 @@ final class FlexLayout {
             for (int i = 0; i < ordered.size(); i++) {
                 FlexItem item = ordered.get(i);
                 FlexProps.AlignItems effectiveAlign = resolveItemAlignment(item.style.flex().alignSelf(), flex.alignItems());
-                float crossOffset = switch (effectiveAlign) {
-                    case CENTER -> (lineCrossSize - item.outerCrossSize(isRow)) / 2f;
-                    case FLEX_END -> lineCrossSize - item.outerCrossSize(isRow);
-                    default -> 0f;
-                };
+                float crossFree = lineCrossSize - item.outerCrossSize(isRow);
+                float crossOffset;
+                if (item.crossMarginStartAuto && item.crossMarginEndAuto) {
+                    crossOffset = Math.max(0f, crossFree) / 2f;
+                } else if (item.crossMarginStartAuto) {
+                    crossOffset = Math.max(0f, crossFree);
+                } else if (item.crossMarginEndAuto) {
+                    crossOffset = 0f;
+                } else {
+                    crossOffset = switch (effectiveAlign) {
+                        case CENTER -> crossFree / 2f;
+                        case FLEX_END -> crossFree;
+                        default -> 0f;
+                    };
+                }
+
+                float extraMainStart = item.mainMarginStartAuto ? autoMarginSpace : 0f;
+                float extraMainEnd = item.mainMarginEndAuto ? autoMarginSpace : 0f;
 
                 float targetX;
                 float targetY;
                 if (isRow) {
-                    targetX = contentX + mainCursor + item.mainMarginStart;
+                    targetX = contentX + mainCursor + item.mainMarginStart + extraMainStart;
                     targetY = contentY + crossCursor + crossOffset + item.crossMarginStart;
                 } else {
                     targetX = contentX + crossCursor + crossOffset + item.crossMarginStart;
-                    targetY = contentY + mainCursor + item.mainMarginStart;
+                    targetY = contentY + mainCursor + item.mainMarginStart + extraMainStart;
                 }
 
                 float dx = targetX - item.laidOutBox.borderBox().x();
                 float dy = targetY - item.laidOutBox.borderBox().y();
                 placedChildren.add(LayoutEngine.translateBox(item.laidOutBox, dx, dy));
 
-                mainCursor += item.outerTargetMain();
+                mainCursor += item.outerTargetMain() + extraMainStart + extraMainEnd;
                 if (i < ordered.size() - 1) {
                     mainCursor += itemGap;
                 }

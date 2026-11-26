@@ -57,6 +57,7 @@ public final class TaffyXmlRunner {
             int failed,
             int skippedOutOfScope,
             Map<String, Integer> skipReasons,
+            Map<String, Integer> failureClusters,
             List<String> sampleFailures
     ) {
         public double passRate() {
@@ -99,6 +100,7 @@ public final class TaffyXmlRunner {
         int failed = 0;
         int skipped = 0;
         Map<String, Integer> skipReasons = new TreeMap<>();
+        Map<String, Integer> failureClusters = new TreeMap<>();
         List<String> sampleFailures = new ArrayList<>();
 
         for (Path file : xmlFiles) {
@@ -153,13 +155,16 @@ public final class TaffyXmlRunner {
                 passed++;
             } else {
                 failed++;
+                String[] parts = testName.split("_");
+                String bucket = parts.length >= 2 ? (parts[0] + "_" + parts[1]) : parts[0];
+                failureClusters.merge(bucket, 1, Integer::sum);
                 if (sampleFailures.size() < 12) {
                     sampleFailures.add(testName + " -> " + mismatches.getFirst());
                 }
             }
         }
 
-        return new SuiteStats(suiteName, xmlFiles.size(), tested, passed, failed, skipped, skipReasons, sampleFailures);
+        return new SuiteStats(suiteName, xmlFiles.size(), tested, passed, failed, skipped, skipReasons, failureClusters, sampleFailures);
     }
 
     private static String findUnsupportedFeature(Element el, boolean isRoot) {
@@ -228,12 +233,14 @@ public final class TaffyXmlRunner {
         CssLength minHeight = parseNonAuto(el.getAttribute("min-height"));
         CssLength maxWidth = parseNonAuto(el.getAttribute("max-width"));
 
-        boolean marginLeftAuto = "auto".equalsIgnoreCase(el.getAttribute("margin-left"));
+        boolean marginTopAuto = "auto".equalsIgnoreCase(el.getAttribute("margin-top"));
         boolean marginRightAuto = "auto".equalsIgnoreCase(el.getAttribute("margin-right"));
+        boolean marginBottomAuto = "auto".equalsIgnoreCase(el.getAttribute("margin-bottom"));
+        boolean marginLeftAuto = "auto".equalsIgnoreCase(el.getAttribute("margin-left"));
         Edges margin = new Edges(
-                pxOrZero(el.getAttribute("margin-top")),
+                marginTopAuto ? 0f : pxOrZero(el.getAttribute("margin-top")),
                 marginRightAuto ? 0f : pxOrZero(el.getAttribute("margin-right")),
-                pxOrZero(el.getAttribute("margin-bottom")),
+                marginBottomAuto ? 0f : pxOrZero(el.getAttribute("margin-bottom")),
                 marginLeftAuto ? 0f : pxOrZero(el.getAttribute("margin-left"))
         );
         Edges padding = new Edges(
@@ -281,7 +288,7 @@ public final class TaffyXmlRunner {
 
         LayoutStyle style = new LayoutStyle(
                 display, width, height, minWidth, minHeight, maxWidth,
-                margin, marginLeftAuto, marginRightAuto,
+                margin, marginTopAuto, marginRightAuto, marginBottomAuto, marginLeftAuto,
                 padding, border, borderBox,
                 null, CssColor.BLACK, CssColor.BLACK, CssColor.BLACK, CssColor.BLACK, 0f,
                 CssColor.BLACK, "sans-serif", 16f, false, false, 1.2f,
@@ -369,6 +376,13 @@ public final class TaffyXmlRunner {
                 .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
                 .limit(6)
                 .forEach(e -> System.out.printf("    - %-28s : %d%n", e.getKey(), e.getValue()));
+        if (!stats.failureClusters().isEmpty()) {
+            System.out.println("  Top failure clusters:");
+            stats.failureClusters().entrySet().stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
+                    .limit(10)
+                    .forEach(e -> System.out.printf("    - %-28s : %d%n", e.getKey(), e.getValue()));
+        }
         if (!stats.sampleFailures().isEmpty()) {
             System.out.println("  Sample failures (first 8):");
             stats.sampleFailures().stream().limit(8).forEach(f -> System.out.println("    * " + f));

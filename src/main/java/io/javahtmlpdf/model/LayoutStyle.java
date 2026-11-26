@@ -15,8 +15,10 @@ public record LayoutStyle(
         CssLength minHeight,
         CssLength maxWidth,
         Edges margin,
-        boolean marginLeftAuto,
+        boolean marginTopAuto,
         boolean marginRightAuto,
+        boolean marginBottomAuto,
+        boolean marginLeftAuto,
         Edges padding,
         Edges border,
         boolean borderBox,
@@ -61,7 +63,7 @@ public record LayoutStyle(
                 Display.BLOCK,
                 null, null, null, null, null,
                 Edges.ZERO,
-                false, false,
+                false, false, false, false,
                 Edges.ZERO,
                 Edges.ZERO,
                 true,
@@ -86,7 +88,7 @@ public record LayoutStyle(
     public LayoutStyle withDimensions(CssLength newWidth, CssLength newHeight) {
         return new LayoutStyle(
                 display, newWidth, newHeight, minWidth, minHeight, maxWidth,
-                margin, marginLeftAuto, marginRightAuto,
+                margin, marginTopAuto, marginRightAuto, marginBottomAuto, marginLeftAuto,
                 padding, border, borderBox,
                 backgroundColor,
                 borderTopColor, borderRightColor, borderBottomColor, borderLeftColor,
@@ -100,7 +102,7 @@ public record LayoutStyle(
     public LayoutStyle withFlex(FlexProps newFlex) {
         return new LayoutStyle(
                 display, width, height, minWidth, minHeight, maxWidth,
-                margin, marginLeftAuto, marginRightAuto,
+                margin, marginTopAuto, marginRightAuto, marginBottomAuto, marginLeftAuto,
                 padding, border, borderBox,
                 backgroundColor,
                 borderTopColor, borderRightColor, borderBottomColor, borderLeftColor,
@@ -114,7 +116,7 @@ public record LayoutStyle(
     public LayoutStyle withGrid(GridProps newGrid) {
         return new LayoutStyle(
                 display, width, height, minWidth, minHeight, maxWidth,
-                margin, marginLeftAuto, marginRightAuto,
+                margin, marginTopAuto, marginRightAuto, marginBottomAuto, marginLeftAuto,
                 padding, border, borderBox,
                 backgroundColor,
                 borderTopColor, borderRightColor, borderBottomColor, borderLeftColor,
@@ -128,7 +130,7 @@ public record LayoutStyle(
     public LayoutStyle withTableRole(TableRole newRole, int newColSpan) {
         return new LayoutStyle(
                 display, width, height, minWidth, minHeight, maxWidth,
-                margin, marginLeftAuto, marginRightAuto,
+                margin, marginTopAuto, marginRightAuto, marginBottomAuto, marginLeftAuto,
                 padding, border, borderBox,
                 backgroundColor,
                 borderTopColor, borderRightColor, borderBottomColor, borderLeftColor,
@@ -164,7 +166,7 @@ public record LayoutStyle(
                 heightPx == null ? null : new CssLength(heightPx, CssLength.Unit.PX),
                 null, null, null,
                 margin,
-                false, false,
+                false, false, false, false,
                 padding,
                 border,
                 borderBox,

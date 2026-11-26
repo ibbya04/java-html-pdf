@@ -358,13 +358,15 @@ public final class StyleResolver {
         CssLength minHeight = parseNonAutoLength(props.get("min-height"));
         CssLength maxWidth = parseNonAutoLength(props.get("max-width"));
 
-        // 4. Margins (including margin-left/right: auto for horizontal centering)
-        boolean marginLeftAuto = "auto".equalsIgnoreCase(trimOrEmpty(props.get("margin-left")));
+        // 4. Margins (including margin-*: auto for centering and Flex auto-margins)
+        boolean marginTopAuto = "auto".equalsIgnoreCase(trimOrEmpty(props.get("margin-top")));
         boolean marginRightAuto = "auto".equalsIgnoreCase(trimOrEmpty(props.get("margin-right")));
+        boolean marginBottomAuto = "auto".equalsIgnoreCase(trimOrEmpty(props.get("margin-bottom")));
+        boolean marginLeftAuto = "auto".equalsIgnoreCase(trimOrEmpty(props.get("margin-left")));
         Edges margin = new Edges(
-                resolveLengthPx(props.get("margin-top"), fontSizePx, rootFontSizePx),
+                marginTopAuto ? 0f : resolveLengthPx(props.get("margin-top"), fontSizePx, rootFontSizePx),
                 marginRightAuto ? 0f : resolveLengthPx(props.get("margin-right"), fontSizePx, rootFontSizePx),
-                resolveLengthPx(props.get("margin-bottom"), fontSizePx, rootFontSizePx),
+                marginBottomAuto ? 0f : resolveLengthPx(props.get("margin-bottom"), fontSizePx, rootFontSizePx),
                 marginLeftAuto ? 0f : resolveLengthPx(props.get("margin-left"), fontSizePx, rootFontSizePx)
         );
 
@@ -444,7 +446,7 @@ public final class StyleResolver {
 
         return new LayoutStyle(
                 display, width, height, minWidth, minHeight, maxWidth,
-                margin, marginLeftAuto, marginRightAuto,
+                margin, marginTopAuto, marginRightAuto, marginBottomAuto, marginLeftAuto,
                 padding, border, borderBox,
                 bg, btColor, brColor, bbColor, blColor, borderRadius,
                 color, fontFamily, fontSizePx, bold, italic, lineHeight,

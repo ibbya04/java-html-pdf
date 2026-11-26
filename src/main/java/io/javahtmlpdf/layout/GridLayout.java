@@ -155,13 +155,46 @@ final class GridLayout {
 
         int numRows = Math.max(occupied.size(), grid.templateRows().size());
 
-        // 2. Compute column track widths
+        // 2. Compute column track widths + justify-content track alignment
         float[] colWidths = resolveColumnWidths(colTracks, placed, explicitContentWidth, colGap, fonts);
+        float totalColGaps = numCols > 1 ? colGap * (numCols - 1) : 0f;
+        float usedColW = sumRange(colWidths, 0, numCols) + totalColGaps;
+        float freeColW = explicitContentWidth != null ? (explicitContentWidth - usedColW) : 0f;
+
+        float colStartOffset = 0f;
+        float effectiveColGap = colGap;
+        switch (style.flex().justifyContent()) {
+            case FLEX_END -> colStartOffset = freeColW;
+            case CENTER -> colStartOffset = freeColW / 2f;
+            case SPACE_BETWEEN -> {
+                if (numCols > 1 && freeColW > 0f) effectiveColGap = colGap + (freeColW / (numCols - 1));
+            }
+            case SPACE_AROUND -> {
+                if (numCols > 0 && freeColW > 0f) {
+                    float step = freeColW / numCols;
+                    colStartOffset = step / 2f;
+                    effectiveColGap = colGap + step;
+                } else {
+                    colStartOffset = freeColW / 2f;
+                }
+            }
+            case SPACE_EVENLY -> {
+                if (numCols > 0 && freeColW > 0f) {
+                    float step = freeColW / (numCols + 1);
+                    colStartOffset = step;
+                    effectiveColGap = colGap + step;
+                } else {
+                    colStartOffset = freeColW / 2f;
+                }
+            }
+            default -> colStartOffset = 0f;
+        }
+
         float[] colOffsets = new float[numCols];
-        float cx = 0f;
+        float cx = colStartOffset;
         for (int c = 0; c < numCols; c++) {
             colOffsets[c] = cx;
-            cx += colWidths[c] + colGap;
+            cx += colWidths[c] + effectiveColGap;
         }
 
         if (!definiteWidth) {
@@ -274,15 +307,18 @@ final class GridLayout {
                     autoCount++;
                 }
                 case FR -> {
+                    // Bare Nfr == minmax(auto, Nfr): explicit fixed-width items establish the auto floor
+                    float explicitFloor = measureTrackExplicitMinWidth(c, placed, pctBase);
+                    widths[c] = explicitFloor;
                     if (t.value() > 0f) {
                         totalFr += t.value();
                         if (explicitContentWidth == null) {
                             float intrinsic = measureTrackIntrinsicWidth(c, placed, 800f, fonts);
-                            widths[c] = intrinsic;
-                            maxFrRatio = Math.max(maxFrRatio, intrinsic / t.value());
+                            widths[c] = Math.max(explicitFloor, intrinsic);
+                            maxFrRatio = Math.max(maxFrRatio, widths[c] / t.value());
                         }
                     } else {
-                        widths[c] = 0f;
+                        fixedAndAutoSum += explicitFloor;
                     }
                 }
                 case MINMAX -> {
@@ -296,15 +332,43 @@ final class GridLayout {
             }
         }
 
+        // CSS Grid §11.5: accommodate spanning items (colSpan > 1) across intrinsic-min tracks (AUTO / bare FR)
+        for (PlacedItem item : placed) {
+            if (item.colSpan > 1) {
+                float needed = explicitItemMinWidth(item, pctBase);
+                if (needed <= 0f) continue;
+                float current = sumRange(widths, item.col, item.colSpan) + colGap * (item.colSpan - 1);
+                if (needed > current) {
+                    List<Integer> eligible = new ArrayList<>();
+                    for (int c = item.col; c < Math.min(n, item.col + item.colSpan); c++) {
+                        GridProps.GridTrack.Kind k = tracks.get(c).kind();
+                        if (k == GridProps.GridTrack.Kind.AUTO || k == GridProps.GridTrack.Kind.FR) {
+                            eligible.add(c);
+                        }
+                    }
+                    if (!eligible.isEmpty()) {
+                        float extra = (needed - current) / eligible.size();
+                        for (int c : eligible) {
+                            widths[c] += extra;
+                            if (tracks.get(c).kind() != GridProps.GridTrack.Kind.FR || tracks.get(c).value() == 0f) {
+                                fixedAndAutoSum += extra;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (explicitContentWidth != null) {
             float totalGaps = n > 1 ? colGap * (n - 1) : 0f;
             float freeWidth = Math.max(0f, explicitContentWidth - fixedAndAutoSum - totalGaps);
             if (totalFr > 0f) {
-                float perFr = freeWidth / totalFr;
+                // CSS Grid §11.7.1: denominator is max(1, sum of flex factors)
+                float perFr = freeWidth / Math.max(1f, totalFr);
                 for (int c = 0; c < n; c++) {
                     GridProps.GridTrack t = tracks.get(c);
                     if (t.kind() == GridProps.GridTrack.Kind.FR && t.value() > 0f) {
-                        widths[c] = perFr * t.value();
+                        widths[c] = Math.max(widths[c], perFr * t.value());
                     } else if (t.kind() == GridProps.GridTrack.Kind.MINMAX && t.maxFr() > 0f) {
                         widths[c] = Math.max(t.minPx(), perFr * t.maxFr());
                     }
@@ -327,6 +391,31 @@ final class GridLayout {
             }
         }
         return widths;
+    }
+
+    private float measureTrackExplicitMinWidth(int col, List<PlacedItem> placed, float pctBase) {
+        float maxMin = 0f;
+        for (PlacedItem item : placed) {
+            if (item.col == col && item.colSpan == 1) {
+                maxMin = Math.max(maxMin, explicitItemMinWidth(item, pctBase));
+            }
+        }
+        return maxMin;
+    }
+
+    private float explicitItemMinWidth(PlacedItem item, float pctBase) {
+        LayoutStyle s = item.node.style();
+        if (s.width() != null && !s.width().isAuto() && !s.width().isPercent()) {
+            float raw = s.width().toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+            float bw = s.borderBox() ? raw : raw + s.padding().horizontal() + s.border().horizontal();
+            return bw + s.margin().horizontal();
+        }
+        if (s.minWidth() != null && !s.minWidth().isAuto() && !s.minWidth().isPercent()) {
+            float raw = s.minWidth().toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+            float bw = s.borderBox() ? raw : raw + s.padding().horizontal() + s.border().horizontal();
+            return bw + s.margin().horizontal();
+        }
+        return 0f;
     }
 
     private float measureTrackIntrinsicWidth(int col, List<PlacedItem> placed, float maxAvail, FontRegistry.LoadedFonts fonts) {
@@ -360,12 +449,16 @@ final class GridLayout {
                 heights[r] = t.length().toPx(ROOT_FONT_SIZE_PX, ROOT_FONT_SIZE_PX, pctBase);
                 explicit[r] = true;
                 fixedSum += heights[r];
-            } else if (t.kind() == GridProps.GridTrack.Kind.FR && t.value() > 0f) {
-                totalFr += t.value();
+            } else if (t.kind() == GridProps.GridTrack.Kind.FR) {
+                if (t.value() > 0f) totalFr += t.value();
+            } else if (t.kind() == GridProps.GridTrack.Kind.MINMAX) {
+                heights[r] = t.minPx();
+                explicit[r] = true; // minmax(minPx, maxFr) does NOT take auto item height as floor
+                if (t.maxFr() > 0f) totalFr += t.maxFr();
             }
         }
 
-        // Single-row items first
+        // Single-row items first (for auto and bare FR rows, not fixed or minmax(0, ...))
         for (PlacedItem item : placed) {
             if (item.rowSpan == 1 && !explicit[item.row]) {
                 float outerH = item.box.borderBox().height() + item.node.style().margin().vertical();
@@ -373,23 +466,43 @@ final class GridLayout {
             }
         }
 
-        // Distribute remaining height to FR row tracks, or stretch auto rows when definite height is given
+        // Multi-row spanning items distribute needed height across eligible intrinsic-min rows (AUTO / bare FR)
+        for (PlacedItem item : placed) {
+            if (item.rowSpan > 1) {
+                float needed = item.box.borderBox().height() + item.node.style().margin().vertical();
+                float current = sumRange(heights, item.row, item.rowSpan) + rowGap * (item.rowSpan - 1);
+                if (needed > current) {
+                    List<Integer> eligible = new ArrayList<>();
+                    for (int r = item.row; r < Math.min(numRows, item.row + item.rowSpan); r++) {
+                        if (!explicit[r]) eligible.add(r);
+                    }
+                    if (!eligible.isEmpty()) {
+                        float extra = (needed - current) / eligible.size();
+                        for (int r : eligible) heights[r] += extra;
+                    }
+                }
+            }
+        }
+
+        // Distribute remaining height to FR / MINMAX row tracks, or stretch auto rows when definite height is given
         if (explicitContentHeight != null) {
             float totalGaps = numRows > 1 ? rowGap * (numRows - 1) : 0f;
             if (totalFr > 0f) {
                 float nonFrSum = 0f;
                 for (int r = 0; r < numRows; r++) {
-                    boolean isFr = r < rowTracks.size()
-                            && rowTracks.get(r).kind() == GridProps.GridTrack.Kind.FR
-                            && rowTracks.get(r).value() > 0f;
-                    if (!isFr) nonFrSum += heights[r];
+                    boolean isFlexRow = r < rowTracks.size()
+                            && ((rowTracks.get(r).kind() == GridProps.GridTrack.Kind.FR && rowTracks.get(r).value() > 0f)
+                                || (rowTracks.get(r).kind() == GridProps.GridTrack.Kind.MINMAX && rowTracks.get(r).maxFr() > 0f));
+                    if (!isFlexRow) nonFrSum += heights[r];
                 }
                 float freeH = Math.max(0f, explicitContentHeight - nonFrSum - totalGaps);
-                float perFr = freeH / totalFr;
+                float perFr = freeH / Math.max(1f, totalFr);
                 for (int r = 0; r < Math.min(numRows, rowTracks.size()); r++) {
                     GridProps.GridTrack t = rowTracks.get(r);
                     if (t.kind() == GridProps.GridTrack.Kind.FR && t.value() > 0f) {
                         heights[r] = Math.max(heights[r], perFr * t.value());
+                    } else if (t.kind() == GridProps.GridTrack.Kind.MINMAX && t.maxFr() > 0f) {
+                        heights[r] = Math.max(t.minPx(), perFr * t.maxFr());
                     }
                 }
             } else {
@@ -405,18 +518,6 @@ final class GridLayout {
                     for (int r = 0; r < numRows; r++) {
                         if (!explicit[r]) heights[r] += extra;
                     }
-                }
-            }
-        }
-
-        // Multi-row spanning items expand the last row if needed
-        for (PlacedItem item : placed) {
-            if (item.rowSpan > 1) {
-                float needed = item.box.borderBox().height() + item.node.style().margin().vertical();
-                float current = sumRange(heights, item.row, item.rowSpan) + rowGap * (item.rowSpan - 1);
-                if (needed > current) {
-                    int lastRow = item.row + item.rowSpan - 1;
-                    heights[lastRow] += (needed - current);
                 }
             }
         }
