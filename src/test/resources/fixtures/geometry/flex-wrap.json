@@ -1,0 +1,32 @@
+{
+  "name": "flex-wrap-multi-line",
+  "viewportWidth": 250,
+  "tolerance": 0.5,
+  "root": {
+    "id": "wrap-container",
+    "style": {
+      "display": "flex",
+      "flexDirection": "row",
+      "flexWrap": "wrap",
+      "gap": 10
+    },
+    "expected": { "x": 0, "y": 0, "width": 250, "height": 110 },
+    "children": [
+      {
+        "id": "c1",
+        "style": { "display": "block", "width": 100, "height": 50 },
+        "expected": { "x": 0, "y": 0, "width": 100, "height": 50 }
+      },
+      {
+        "id": "c2",
+        "style": { "display": "block", "width": 100, "height": 50 },
+        "expected": { "x": 110, "y": 0, "width": 100, "height": 50 }
+      },
+      {
+        "id": "c3",
+        "style": { "display": "block", "width": 100, "height": 50 },
+        "expected": { "x": 0, "y": 60, "width": 100, "height": 50 }
+      }
+    ]
+  }
+}

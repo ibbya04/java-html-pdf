@@ -1,0 +1,31 @@
+{
+  "name": "flex-grow-proportional-with-gap",
+  "viewportWidth": 500,
+  "tolerance": 0.5,
+  "root": {
+    "id": "row",
+    "style": {
+      "display": "flex",
+      "flexDirection": "row",
+      "gap": 20
+    },
+    "expected": { "x": 0, "y": 0, "width": 500, "height": 60 },
+    "children": [
+      {
+        "id": "fixed",
+        "style": { "display": "block", "width": 100, "height": 60 },
+        "expected": { "x": 0, "y": 0, "width": 100, "height": 60 }
+      },
+      {
+        "id": "grow1",
+        "style": { "display": "block", "flexGrow": 1, "flexBasis": "0px", "height": 40 },
+        "expected": { "x": 120, "y": 0, "width": 120, "height": 40 }
+      },
+      {
+        "id": "grow2",
+        "style": { "display": "block", "flexGrow": 2, "flexBasis": "0px" },
+        "expected": { "x": 260, "y": 0, "width": 240, "height": 60 }
+      }
+    ]
+  }
+}

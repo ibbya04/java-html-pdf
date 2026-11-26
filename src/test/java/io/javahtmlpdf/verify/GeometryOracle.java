@@ -2,9 +2,13 @@ package io.javahtmlpdf.verify;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.javahtmlpdf.css.CssLength;
+import io.javahtmlpdf.css.StyleResolver;
 import io.javahtmlpdf.layout.LayoutEngine;
 import io.javahtmlpdf.model.Display;
 import io.javahtmlpdf.model.Edges;
+import io.javahtmlpdf.model.FlexProps;
+import io.javahtmlpdf.model.GridProps;
 import io.javahtmlpdf.model.LayoutBox;
 import io.javahtmlpdf.model.LayoutNode;
 import io.javahtmlpdf.model.LayoutStyle;
@@ -105,7 +109,47 @@ public final class GeometryOracle {
         String bc = styleJson.has("borderColor") ? styleJson.get("borderColor").asText() : null;
         String color = styleJson.has("color") ? styleJson.get("color").asText() : "#000000";
         float fontSize = styleJson.has("fontSize") ? (float) styleJson.get("fontSize").asDouble() : d.fontSizePx();
-        return LayoutStyle.simpleBlock(display, width, height, margin, padding, border, borderBox, bg, bc, color, fontSize);
+        LayoutStyle base = LayoutStyle.simpleBlock(display, width, height, margin, padding, border, borderBox, bg, bc, color, fontSize);
+
+        float gap = styleJson.has("gap") ? (float) styleJson.get("gap").asDouble() : 0f;
+        float rowGap = styleJson.has("rowGap") ? (float) styleJson.get("rowGap").asDouble() : gap;
+        float colGap = styleJson.has("columnGap") ? (float) styleJson.get("columnGap").asDouble() : gap;
+
+        FlexProps flex = new FlexProps(
+                parseEnum(styleJson, "flexDirection", FlexProps.FlexDirection.class, FlexProps.FlexDirection.ROW),
+                parseEnum(styleJson, "flexWrap", FlexProps.FlexWrap.class, FlexProps.FlexWrap.NOWRAP),
+                parseEnum(styleJson, "justifyContent", FlexProps.JustifyContent.class, FlexProps.JustifyContent.FLEX_START),
+                parseEnum(styleJson, "alignItems", FlexProps.AlignItems.class, FlexProps.AlignItems.STRETCH),
+                parseEnum(styleJson, "alignSelf", FlexProps.AlignSelf.class, FlexProps.AlignSelf.AUTO),
+                styleJson.has("flexGrow") ? (float) styleJson.get("flexGrow").asDouble() : 0f,
+                styleJson.has("flexShrink") ? (float) styleJson.get("flexShrink").asDouble() : 1f,
+                styleJson.has("flexBasis") ? CssLength.parse(styleJson.get("flexBasis").asText()).orElse(null) : null,
+                rowGap,
+                colGap
+        );
+
+        GridProps grid = new GridProps(
+                styleJson.has("gridTemplateColumns")
+                        ? StyleResolver.parseGridTracks(styleJson.get("gridTemplateColumns").asText())
+                        : List.of(),
+                styleJson.has("gridTemplateRows")
+                        ? StyleResolver.parseGridTracks(styleJson.get("gridTemplateRows").asText())
+                        : List.of(),
+                styleJson.has("gridColStart") ? styleJson.get("gridColStart").asInt() : 0,
+                styleJson.has("gridColSpan") ? styleJson.get("gridColSpan").asInt() : 1,
+                styleJson.has("gridRowStart") ? styleJson.get("gridRowStart").asInt() : 0,
+                styleJson.has("gridRowSpan") ? styleJson.get("gridRowSpan").asInt() : 1,
+                rowGap,
+                colGap
+        );
+
+        return base.withFlex(flex).withGrid(grid);
+    }
+
+    private static <E extends Enum<E>> E parseEnum(JsonNode node, String field, Class<E> type, E fallback) {
+        if (!node.has(field) || node.get(field).isNull()) return fallback;
+        String norm = node.get(field).asText().trim().toUpperCase(Locale.ROOT).replace('-', '_');
+        return Enum.valueOf(type, norm);
     }
 
     private Edges parseEdges(JsonNode node) {

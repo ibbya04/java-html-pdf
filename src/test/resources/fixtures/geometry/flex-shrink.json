@@ -1,0 +1,25 @@
+{
+  "name": "flex-shrink-overflow",
+  "viewportWidth": 300,
+  "tolerance": 0.5,
+  "root": {
+    "id": "row",
+    "style": {
+      "display": "flex",
+      "flexDirection": "row"
+    },
+    "expected": { "x": 0, "y": 0, "width": 300, "height": 50 },
+    "children": [
+      {
+        "id": "a",
+        "style": { "display": "block", "width": 200, "height": 50, "flexShrink": 1 },
+        "expected": { "x": 0, "y": 0, "width": 150, "height": 50 }
+      },
+      {
+        "id": "b",
+        "style": { "display": "block", "width": 200, "height": 50, "flexShrink": 1 },
+        "expected": { "x": 150, "y": 0, "width": 150, "height": 50 }
+      }
+    ]
+  }
+}

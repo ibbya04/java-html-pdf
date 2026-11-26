@@ -3,10 +3,14 @@ package io.javahtmlpdf.css;
 import io.javahtmlpdf.PageSize;
 import io.javahtmlpdf.RenderDiagnostic;
 import io.javahtmlpdf.ResourceLoader;
+import io.javahtmlpdf.model.BreakProps;
 import io.javahtmlpdf.model.Display;
 import io.javahtmlpdf.model.Edges;
+import io.javahtmlpdf.model.FlexProps;
+import io.javahtmlpdf.model.GridProps;
 import io.javahtmlpdf.model.LayoutNode;
 import io.javahtmlpdf.model.LayoutStyle;
+import io.javahtmlpdf.model.TableRole;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
@@ -37,15 +41,25 @@ public final class StyleResolver {
     ) {}
 
     private static final Set<String> SUPPORTED_PROPERTIES = Set.of(
-            "display", "width", "height", "max-width", "box-sizing",
+            "display", "width", "height", "min-width", "min-height", "max-width", "box-sizing",
             "margin-top", "margin-right", "margin-bottom", "margin-left",
             "padding-top", "padding-right", "padding-bottom", "padding-left",
             "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
             "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
             "border-radius", "background-color", "color",
             "font-family", "font-size", "font-weight", "font-style",
-            "line-height", "text-align", "text-decoration", "overflow",
-            "list-style", "list-style-type", "object-fit", "letter-spacing", "text-underline-offset"
+            "line-height", "text-align", "text-decoration", "white-space", "overflow",
+            "list-style", "list-style-type", "object-fit", "letter-spacing", "text-underline-offset",
+            "text-transform", "border-collapse",
+            // Flexbox
+            "flex-direction", "flex-wrap", "justify-content", "align-items", "align-self",
+            "flex-grow", "flex-shrink", "flex-basis", "row-gap", "column-gap",
+            // Grid
+            "grid-template-columns", "grid-template-rows", "grid-column", "grid-row",
+            // Pagination / Fragmentation
+            "break-before", "break-after", "break-inside",
+            "page-break-before", "page-break-after", "page-break-inside",
+            "orphans", "widows"
     );
 
     private static final Set<String> INHERITED_PROPERTIES = Set.of(
@@ -202,16 +216,7 @@ public final class StyleResolver {
         if (w == style.width() && h == style.height()) {
             return style;
         }
-        return new LayoutStyle(
-                style.display(), w, h, style.maxWidth(),
-                style.margin(), style.marginLeftAuto(), style.marginRightAuto(),
-                style.padding(), style.border(), style.borderBox(),
-                style.backgroundColor(),
-                style.borderTopColor(), style.borderRightColor(), style.borderBottomColor(), style.borderLeftColor(),
-                style.borderRadiusPx(), style.color(), style.fontFamily(), style.fontSizePx(),
-                style.bold(), style.italic(), style.lineHeightMultiplier(), style.textAlign(),
-                style.underline(), style.listItem(), style.overflowHidden()
-        );
+        return style.withDimensions(w, h);
     }
 
     private record MatchedDecl(CssRule.Declaration decl, boolean userAgent, CssRule.Specificity specificity, int order) {}
@@ -305,6 +310,8 @@ public final class StyleResolver {
         // 3. Dimensions
         CssLength width = parseNonAutoLength(props.get("width"));
         CssLength height = parseNonAutoLength(props.get("height"));
+        CssLength minWidth = parseNonAutoLength(props.get("min-width"));
+        CssLength minHeight = parseNonAutoLength(props.get("min-height"));
         CssLength maxWidth = parseNonAutoLength(props.get("max-width"));
 
         // 4. Margins (including margin-left/right: auto for horizontal centering)
@@ -351,15 +358,54 @@ public final class StyleResolver {
         float lineHeight = parseLineHeight(props.get("line-height"), fontSizePx, rootFontSizePx, parent.lineHeightMultiplier());
         LayoutStyle.TextAlign textAlign = parseTextAlign(props.get("text-align"), parent.textAlign());
         boolean underline = parseUnderline(props.get("text-decoration"), parent.underline());
+        boolean whiteSpaceNowrap = "nowrap".equalsIgnoreCase(trimOrEmpty(props.get("white-space")));
         boolean overflowHidden = "hidden".equalsIgnoreCase(trimOrEmpty(props.get("overflow")));
 
+        // 8. Flexbox properties
+        float rowGap = resolveLengthPx(props.get("row-gap"), fontSizePx, rootFontSizePx);
+        float colGap = resolveLengthPx(props.get("column-gap"), fontSizePx, rootFontSizePx);
+        FlexProps flex = new FlexProps(
+                parseFlexDirection(props.get("flex-direction")),
+                parseFlexWrap(props.get("flex-wrap")),
+                parseJustifyContent(props.get("justify-content")),
+                parseAlignItems(props.get("align-items")),
+                parseAlignSelf(props.get("align-self")),
+                parseFloatOr(props.get("flex-grow"), 0f),
+                parseFloatOr(props.get("flex-shrink"), 1f),
+                parseNonAutoLength(props.get("flex-basis")),
+                rowGap,
+                colGap
+        );
+
+        // 9. Grid properties
+        int[] colPlace = parseGridPlacement(props.get("grid-column"));
+        int[] rowPlace = parseGridPlacement(props.get("grid-row"));
+        GridProps grid = new GridProps(
+                parseGridTracks(props.get("grid-template-columns")),
+                parseGridTracks(props.get("grid-template-rows")),
+                colPlace[0], colPlace[1],
+                rowPlace[0], rowPlace[1],
+                rowGap,
+                colGap
+        );
+
+        // 10. Pagination / Break properties
+        BreakProps breaks = new BreakProps(
+                isPageBreak(props.get("break-before")) || isPageBreak(props.get("page-break-before")),
+                isAvoidBreak(props.get("break-after")) || isAvoidBreak(props.get("page-break-after")),
+                isAvoidBreak(props.get("break-inside")) || isAvoidBreak(props.get("page-break-inside")),
+                Math.max(1, (int) parseFloatOr(props.get("orphans"), 2f)),
+                Math.max(1, (int) parseFloatOr(props.get("widows"), 2f))
+        );
+
         return new LayoutStyle(
-                display, width, height, maxWidth,
+                display, width, height, minWidth, minHeight, maxWidth,
                 margin, marginLeftAuto, marginRightAuto,
                 padding, border, borderBox,
                 bg, btColor, brColor, bbColor, blColor, borderRadius,
                 color, fontFamily, fontSizePx, bold, italic, lineHeight,
-                textAlign, underline, listItem, overflowHidden
+                textAlign, underline, whiteSpaceNowrap, listItem, overflowHidden,
+                flex, grid, TableRole.NONE, 1, breaks
         );
     }
 
@@ -597,5 +643,174 @@ public final class StyleResolver {
 
     private static String trimOrEmpty(String s) {
         return s == null ? "" : s.trim();
+    }
+
+    private static float parseFloatOr(String raw, float fallback) {
+        if (raw == null) return fallback;
+        try {
+            return Float.parseFloat(raw.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static FlexProps.FlexDirection parseFlexDirection(String raw) {
+        if (raw == null) return FlexProps.FlexDirection.ROW;
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "column" -> FlexProps.FlexDirection.COLUMN;
+            case "row-reverse" -> FlexProps.FlexDirection.ROW_REVERSE;
+            case "column-reverse" -> FlexProps.FlexDirection.COLUMN_REVERSE;
+            default -> FlexProps.FlexDirection.ROW;
+        };
+    }
+
+    private static FlexProps.FlexWrap parseFlexWrap(String raw) {
+        if (raw == null) return FlexProps.FlexWrap.NOWRAP;
+        return "wrap".equalsIgnoreCase(raw.trim()) ? FlexProps.FlexWrap.WRAP : FlexProps.FlexWrap.NOWRAP;
+    }
+
+    private static FlexProps.JustifyContent parseJustifyContent(String raw) {
+        if (raw == null) return FlexProps.JustifyContent.FLEX_START;
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "flex-end", "end", "right" -> FlexProps.JustifyContent.FLEX_END;
+            case "center" -> FlexProps.JustifyContent.CENTER;
+            case "space-between" -> FlexProps.JustifyContent.SPACE_BETWEEN;
+            case "space-around" -> FlexProps.JustifyContent.SPACE_AROUND;
+            case "space-evenly" -> FlexProps.JustifyContent.SPACE_EVENLY;
+            default -> FlexProps.JustifyContent.FLEX_START;
+        };
+    }
+
+    private static FlexProps.AlignItems parseAlignItems(String raw) {
+        if (raw == null) return FlexProps.AlignItems.STRETCH;
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "flex-start", "start" -> FlexProps.AlignItems.FLEX_START;
+            case "flex-end", "end" -> FlexProps.AlignItems.FLEX_END;
+            case "center" -> FlexProps.AlignItems.CENTER;
+            default -> FlexProps.AlignItems.STRETCH;
+        };
+    }
+
+    private static FlexProps.AlignSelf parseAlignSelf(String raw) {
+        if (raw == null) return FlexProps.AlignSelf.AUTO;
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "stretch" -> FlexProps.AlignSelf.STRETCH;
+            case "flex-start", "start" -> FlexProps.AlignSelf.FLEX_START;
+            case "flex-end", "end" -> FlexProps.AlignSelf.FLEX_END;
+            case "center" -> FlexProps.AlignSelf.CENTER;
+            default -> FlexProps.AlignSelf.AUTO;
+        };
+    }
+
+    public static List<GridProps.GridTrack> parseGridTracks(String raw) {
+        List<GridProps.GridTrack> tracks = new ArrayList<>();
+        if (raw == null || raw.isBlank() || "none".equalsIgnoreCase(raw.trim())) {
+            return tracks;
+        }
+        List<String> tokens = splitTopLevelTokens(raw.trim());
+        for (String tok : tokens) {
+            String lower = tok.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("repeat(") && lower.endsWith(")")) {
+                String inner = tok.substring(7, tok.length() - 1);
+                int comma = inner.indexOf(',');
+                if (comma > 0) {
+                    String countStr = inner.substring(0, comma).trim();
+                    String pattern = inner.substring(comma + 1).trim();
+                    try {
+                        int count = Integer.parseInt(countStr);
+                        List<GridProps.GridTrack> sub = parseGridTracks(pattern);
+                        for (int i = 0; i < count; i++) {
+                            tracks.addAll(sub);
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // auto-fit / auto-fill fallback: single flexible track
+                        tracks.addAll(parseGridTracks(pattern));
+                    }
+                }
+            } else if (lower.startsWith("minmax(") && lower.endsWith(")")) {
+                String inner = tok.substring(7, tok.length() - 1);
+                int comma = inner.indexOf(',');
+                if (comma > 0) {
+                    float minPx = CssLength.parse(inner.substring(0, comma).trim())
+                            .map(l -> l.toPx(16f, 16f, 0f)).orElse(0f);
+                    String maxStr = inner.substring(comma + 1).trim().toLowerCase(Locale.ROOT);
+                    float maxFr = maxStr.endsWith("fr")
+                            ? parseFloatOr(maxStr.substring(0, maxStr.length() - 2), 1f)
+                            : 1f;
+                    tracks.add(GridProps.GridTrack.minmax(minPx, maxFr));
+                }
+            } else if (lower.endsWith("fr")) {
+                float fr = parseFloatOr(lower.substring(0, lower.length() - 2), 1f);
+                tracks.add(GridProps.GridTrack.fr(fr));
+            } else if ("auto".equals(lower)) {
+                tracks.add(GridProps.GridTrack.auto());
+            } else {
+                CssLength.parse(tok).ifPresent(len -> tracks.add(GridProps.GridTrack.length(len)));
+            }
+        }
+        return tracks;
+    }
+
+    private static List<String> splitTopLevelTokens(String s) {
+        List<String> out = new ArrayList<>();
+        int depth = 0;
+        int start = -1;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '(') {
+                if (start < 0) start = i;
+                depth++;
+            } else if (c == ')') {
+                depth = Math.max(0, depth - 1);
+            } else if (Character.isWhitespace(c) && depth == 0) {
+                if (start >= 0) {
+                    out.add(s.substring(start, i));
+                    start = -1;
+                }
+            } else if (start < 0) {
+                start = i;
+            }
+        }
+        if (start >= 0) out.add(s.substring(start));
+        return out;
+    }
+
+    private static int[] parseGridPlacement(String raw) {
+        // Returns [start (0=auto, 1-based otherwise), span (>=1)]
+        if (raw == null || raw.isBlank() || "auto".equalsIgnoreCase(raw.trim())) {
+            return new int[]{0, 1};
+        }
+        String s = raw.trim().toLowerCase(Locale.ROOT);
+        if (s.contains("/")) {
+            String[] parts = s.split("/", 2);
+            String left = parts[0].trim();
+            String right = parts[1].trim();
+            int start = left.startsWith("span") ? 0 : (int) parseFloatOr(left, 0f);
+            int span = 1;
+            if (right.startsWith("span")) {
+                span = Math.max(1, (int) parseFloatOr(right.substring(4).trim(), 1f));
+            } else if (start > 0) {
+                int end = (int) parseFloatOr(right, start + 1);
+                if (end > start) span = end - start;
+            }
+            return new int[]{start, span};
+        }
+        if (s.startsWith("span")) {
+            int span = Math.max(1, (int) parseFloatOr(s.substring(4).trim(), 1f));
+            return new int[]{0, span};
+        }
+        int start = (int) parseFloatOr(s, 0f);
+        return new int[]{start, 1};
+    }
+
+    private static boolean isPageBreak(String raw) {
+        if (raw == null) return false;
+        String s = raw.trim().toLowerCase(Locale.ROOT);
+        return "page".equals(s) || "always".equals(s);
+    }
+
+    private static boolean isAvoidBreak(String raw) {
+        if (raw == null) return false;
+        return raw.trim().toLowerCase(Locale.ROOT).contains("avoid");
     }
 }

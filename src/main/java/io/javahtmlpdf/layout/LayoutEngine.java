@@ -28,6 +28,7 @@ import java.util.List;
 public class LayoutEngine {
 
     private static final float ROOT_FONT_SIZE_PX = 16f;
+    private final FlexLayout flexLayout = new FlexLayout(this);
 
     public LayoutBox layout(LayoutNode root, float viewportWidthPx) {
         return layout(root, viewportWidthPx, 0f, 0f, null);
@@ -40,7 +41,31 @@ public class LayoutEngine {
             float startY,
             FontRegistry.LoadedFonts fonts
     ) {
-        return layoutBlock(root, startX, startY, viewportWidthPx, fonts);
+        return layoutNode(root, startX, startY, viewportWidthPx, fonts);
+    }
+
+    LayoutBox layoutNodeAtOrigin(LayoutNode node, float containingWidth, FontRegistry.LoadedFonts fonts) {
+        return layoutNode(node, 0f, 0f, containingWidth, fonts);
+    }
+
+    LayoutBox layoutNode(
+            LayoutNode node,
+            float originX,
+            float originY,
+            float containingWidth,
+            FontRegistry.LoadedFonts fonts
+    ) {
+        Display display = node.style().display();
+        if (display == Display.NONE) {
+            return new LayoutBox(node.id(), node.style(), Rect.ZERO, List.of(), null, null, List.of());
+        }
+        if (node.isImageNode()) {
+            return layoutImage(node, originX, originY, containingWidth);
+        }
+        if (display == Display.FLEX) {
+            return flexLayout.layout(node, originX, originY, containingWidth, fonts);
+        }
+        return layoutBlock(node, originX, originY, containingWidth, fonts);
     }
 
     private LayoutBox layoutBlock(
@@ -128,7 +153,7 @@ public class LayoutEngine {
                             ? Math.max(prevMarginBottom, childMarginTop) - childMarginTop
                             : 0f;
 
-                    LayoutBox childBox = layoutBlock(child, contentX, cursorY + effectiveTopGap, contentWidth, fonts);
+                    LayoutBox childBox = layoutNode(child, contentX, cursorY + effectiveTopGap, contentWidth, fonts);
                     laidOutChildren.add(childBox);
                     cursorY = childBox.borderBox().bottom();
                     prevMarginBottom = child.style().margin().bottom();
@@ -225,7 +250,7 @@ public class LayoutEngine {
         );
     }
 
-    private float resolveBorderBoxWidth(
+    float resolveBorderBoxWidth(
             LayoutStyle style,
             float containingWidth,
             Edges margin,
@@ -247,12 +272,91 @@ public class LayoutEngine {
         return width;
     }
 
-    private float resolveBorderBoxHeight(LayoutStyle style, float contentHeight, Edges padding, Edges border) {
+    float resolveBorderBoxHeight(LayoutStyle style, float contentHeight, Edges padding, Edges border) {
         if (style.height() != null) {
             float raw = style.height().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, contentHeight);
             return style.borderBox() ? raw : raw + padding.vertical() + border.vertical();
         }
         return border.vertical() + padding.vertical() + contentHeight;
+    }
+
+    /**
+     * Estimates the intrinsic max-content border-box width of a node (used by Flexbox, Grid, and Tables).
+     */
+    float measureMaxContentWidth(LayoutNode node, float maxAvailableWidth, FontRegistry.LoadedFonts fonts) {
+        LayoutStyle s = node.style();
+        Edges p = s.padding();
+        Edges b = s.border();
+        if (s.width() != null && !s.width().isAuto()) {
+            float raw = s.width().toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, maxAvailableWidth);
+            return s.borderBox() ? raw : raw + p.horizontal() + b.horizontal();
+        }
+        if (node.isImageNode()) {
+            LayoutBox imgBox = layoutImage(node, 0f, 0f, maxAvailableWidth);
+            return imgBox.borderBox().width();
+        }
+        if (node.isTextNode()) {
+            return measureWidth(node.text(), s, fonts);
+        }
+
+        float maxChildWidth = 0f;
+        float inlineAccum = 0f;
+        for (LayoutNode child : node.children()) {
+            if (child.style().display() == Display.NONE) continue;
+            if (isInlineFlowNode(child)) {
+                inlineAccum += measureInlineTreeWidth(child, fonts);
+                maxChildWidth = Math.max(maxChildWidth, inlineAccum);
+            } else {
+                inlineAccum = 0f;
+                float cw = measureMaxContentWidth(child, maxAvailableWidth, fonts) + child.style().margin().horizontal();
+                maxChildWidth = Math.max(maxChildWidth, cw);
+            }
+        }
+        return maxChildWidth + p.horizontal() + b.horizontal();
+    }
+
+    private float measureInlineTreeWidth(LayoutNode node, FontRegistry.LoadedFonts fonts) {
+        if (node.isTextNode()) {
+            return measureWidth(node.text(), node.style(), fonts);
+        }
+        float sum = 0f;
+        for (LayoutNode child : node.children()) {
+            sum += measureInlineTreeWidth(child, fonts);
+        }
+        return sum + node.style().padding().horizontal() + node.style().border().horizontal();
+    }
+
+    /**
+     * Immutably translates a laid-out {@link LayoutBox} subtree and all its {@link LineBox}es by {@code (dx, dy)}.
+     */
+    public static LayoutBox translateBox(LayoutBox box, float dx, float dy) {
+        if (Math.abs(dx) < 0.001f && Math.abs(dy) < 0.001f) {
+            return box;
+        }
+        Rect r = box.borderBox();
+        Rect movedRect = new Rect(r.x() + dx, r.y() + dy, r.width(), r.height());
+
+        List<LineBox> movedLines = new ArrayList<>(box.lines().size());
+        for (LineBox lb : box.lines()) {
+            List<InlineRun> movedRuns = new ArrayList<>(lb.runs().size());
+            for (InlineRun run : lb.runs()) {
+                movedRuns.add(new InlineRun(
+                        run.text(), run.style(),
+                        run.x() + dx, run.y() + dy,
+                        run.width(), run.height(),
+                        run.baselineY() + dy,
+                        run.linkHref()
+                ));
+            }
+            movedLines.add(new LineBox(lb.x() + dx, lb.y() + dy, lb.width(), lb.height(), lb.baselineY() + dy, movedRuns));
+        }
+
+        List<LayoutBox> movedChildren = new ArrayList<>(box.children().size());
+        for (LayoutBox child : box.children()) {
+            movedChildren.add(translateBox(child, dx, dy));
+        }
+
+        return new LayoutBox(box.id(), box.style(), movedRect, movedLines, box.imageBytes(), box.listMarker(), movedChildren);
     }
 
     private static boolean isInlineFlowNode(LayoutNode node) {

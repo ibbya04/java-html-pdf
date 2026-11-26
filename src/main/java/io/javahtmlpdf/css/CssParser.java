@@ -110,6 +110,14 @@ public final class CssParser {
             case "border-left" -> expandBorderShorthand("left", val, important, out);
             case "border-width" -> expandBorderEdgeProperty("width", val, important, out);
             case "border-color" -> expandBorderEdgeProperty("color", val, important, out);
+            case "gap" -> {
+                List<String> parts = splitTokensRespectingParens(val);
+                if (!parts.isEmpty()) {
+                    out.add(new CssRule.Declaration("row-gap", parts.get(0), important));
+                    out.add(new CssRule.Declaration("column-gap", parts.size() >= 2 ? parts.get(1) : parts.get(0), important));
+                }
+            }
+            case "flex" -> expandFlexShorthand(val, important, out);
             case "background" -> {
                 if (CssColor.parse(val).isPresent()) {
                     out.add(new CssRule.Declaration("background-color", val, important));
@@ -193,6 +201,57 @@ public final class CssParser {
             if (color != null) {
                 out.add(new CssRule.Declaration("border-" + s + "-color", color, important));
             }
+        }
+    }
+
+    private static void expandFlexShorthand(String val, boolean important, List<CssRule.Declaration> out) {
+        String lower = val.trim().toLowerCase(Locale.ROOT);
+        if ("none".equals(lower)) {
+            out.add(new CssRule.Declaration("flex-grow", "0", important));
+            out.add(new CssRule.Declaration("flex-shrink", "0", important));
+            out.add(new CssRule.Declaration("flex-basis", "auto", important));
+            return;
+        }
+        if ("auto".equals(lower)) {
+            out.add(new CssRule.Declaration("flex-grow", "1", important));
+            out.add(new CssRule.Declaration("flex-shrink", "1", important));
+            out.add(new CssRule.Declaration("flex-basis", "auto", important));
+            return;
+        }
+        List<String> parts = splitTokensRespectingParens(val);
+        if (parts.size() == 1) {
+            String tok = parts.get(0);
+            if (isBareNumber(tok)) {
+                out.add(new CssRule.Declaration("flex-grow", tok, important));
+                out.add(new CssRule.Declaration("flex-shrink", "1", important));
+                out.add(new CssRule.Declaration("flex-basis", "0px", important));
+            } else {
+                out.add(new CssRule.Declaration("flex-grow", "1", important));
+                out.add(new CssRule.Declaration("flex-shrink", "1", important));
+                out.add(new CssRule.Declaration("flex-basis", tok, important));
+            }
+        } else if (parts.size() == 2) {
+            out.add(new CssRule.Declaration("flex-grow", parts.get(0), important));
+            if (isBareNumber(parts.get(1))) {
+                out.add(new CssRule.Declaration("flex-shrink", parts.get(1), important));
+                out.add(new CssRule.Declaration("flex-basis", "0px", important));
+            } else {
+                out.add(new CssRule.Declaration("flex-shrink", "1", important));
+                out.add(new CssRule.Declaration("flex-basis", parts.get(1), important));
+            }
+        } else if (parts.size() >= 3) {
+            out.add(new CssRule.Declaration("flex-grow", parts.get(0), important));
+            out.add(new CssRule.Declaration("flex-shrink", parts.get(1), important));
+            out.add(new CssRule.Declaration("flex-basis", parts.get(2), important));
+        }
+    }
+
+    private static boolean isBareNumber(String s) {
+        try {
+            Float.parseFloat(s);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 

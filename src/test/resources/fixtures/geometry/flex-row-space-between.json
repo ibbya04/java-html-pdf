@@ -1,0 +1,29 @@
+{
+  "name": "flex-row-space-between-align-center",
+  "viewportWidth": 600,
+  "tolerance": 0.5,
+  "root": {
+    "id": "header",
+    "style": {
+      "display": "flex",
+      "flexDirection": "row",
+      "justifyContent": "space-between",
+      "alignItems": "center",
+      "padding": 20,
+      "height": 100
+    },
+    "expected": { "x": 0, "y": 0, "width": 600, "height": 100 },
+    "children": [
+      {
+        "id": "title",
+        "style": { "display": "block", "width": 200, "height": 40 },
+        "expected": { "x": 20, "y": 30, "width": 200, "height": 40 }
+      },
+      {
+        "id": "badge",
+        "style": { "display": "block", "width": 80, "height": 24 },
+        "expected": { "x": 500, "y": 38, "width": 80, "height": 24 }
+      }
+    ]
+  }
+}

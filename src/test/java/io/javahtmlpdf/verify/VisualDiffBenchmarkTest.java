@@ -189,6 +189,124 @@ class VisualDiffBenchmarkTest {
         }
     }
 
+    @Test
+    void flexboxLayoutMatchesHeadlessChrome() throws Exception {
+        VisualDiffBenchmark benchmark = new VisualDiffBenchmark();
+        Assumptions.assumeTrue(
+                benchmark.findChromeBinary().isPresent(),
+                "Skipping Tier 3 visual diff: Chrome/Chromium not installed"
+        );
+
+        byte[] ttfBytes;
+        try (InputStream in = getClass().getResourceAsStream("/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf")) {
+            Assumptions.assumeTrue(in != null, "Bundled LiberationSans-Regular.ttf not found");
+            ttfBytes = in.readAllBytes();
+        }
+        String fontBase64 = Base64.getEncoder().encodeToString(ttfBytes);
+
+        String html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8" />
+                  <style>
+                    @page { size: A4; margin: 48px; }
+                    @font-face {
+                      font-family: 'LibSans';
+                      src: url('data:font/ttf;base64,%s') format('truetype');
+                    }
+                    * { box-sizing: border-box; }
+                    body { margin: 0; font-family: 'LibSans', sans-serif; font-size: 14px; color: #1f2937; background: #fff; }
+                    .header {
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      padding: 16px 20px;
+                      border: 1px solid #d1d5db;
+                      border-radius: 8px;
+                      background: #f9fafb;
+                      margin-bottom: 18px;
+                    }
+                    .title { margin: 0; font-size: 20px; color: #111827; }
+                    .subtitle { margin: 4px 0 0 0; font-size: 12px; color: #6b7280; }
+                    .badge {
+                      padding: 6px 12px;
+                      border-radius: 12px;
+                      background: #dbeafe;
+                      color: #1d4ed8;
+                      font-size: 12px;
+                    }
+                    .kpi-row {
+                      display: flex;
+                      gap: 16px;
+                      margin-bottom: 18px;
+                    }
+                    .kpi {
+                      flex: 1;
+                      padding: 16px;
+                      border: 1px solid #d1d5db;
+                      border-radius: 8px;
+                      background: #ffffff;
+                    }
+                    .kpi-label { margin: 0 0 6px 0; font-size: 11px; color: #6b7280; }
+                    .kpi-val { margin: 0; font-size: 22px; color: #111827; }
+                  </style>
+                </head>
+                <body>
+                  <header class="header">
+                    <div>
+                      <p class="title">Q4 Operations Summary</p>
+                      <p class="subtitle">Automated Flexbox Layout Benchmark</p>
+                    </div>
+                    <div class="badge">Status: Live</div>
+                  </header>
+                  <div class="kpi-row">
+                    <div class="kpi">
+                      <p class="kpi-label">Revenue</p>
+                      <p class="kpi-val">$142,800</p>
+                    </div>
+                    <div class="kpi">
+                      <p class="kpi-label">Active Users</p>
+                      <p class="kpi-val">8,412</p>
+                    </div>
+                    <div class="kpi">
+                      <p class="kpi-label">Uptime</p>
+                      <p class="kpi-val">99.98%%</p>
+                    </div>
+                  </div>
+                </body>
+                </html>
+                """.formatted(fontBase64);
+
+        Path tempHtml = Files.createTempFile("flex-benchmark-", ".html");
+        try {
+            Files.writeString(tempHtml, html, StandardCharsets.UTF_8);
+            byte[] chromePdf = benchmark.renderWithChrome(tempHtml);
+
+            RenderResult actual = HtmlToPdf.builder()
+                    .html(html)
+                    .pageSize(PageSize.A4)
+                    .font("LibSans", false, false, ttfBytes)
+                    .render();
+
+            VisualDiffBenchmark.BenchmarkReport report =
+                    benchmark.comparePdfs("flex-benchmark", chromePdf, actual.pdfBytes());
+
+            System.out.printf("Phase 2A Visual Diff Benchmark (flex-benchmark): %.2f%% pixel similarity (diff: %s)%n",
+                    report.averageSimilarityPercent(), report.pages().getFirst().diffImage());
+
+            assertEquals(1, report.referencePages());
+            assertEquals(1, report.actualPages());
+            assertTrue(
+                    report.averageSimilarityPercent() >= 96.0,
+                    () -> String.format("Expected >= 96.0%% visual similarity with Chrome, got %.2f%% (diff: %s)",
+                            report.averageSimilarityPercent(), report.pages().getFirst().diffImage())
+            );
+        } finally {
+            Files.deleteIfExists(tempHtml);
+        }
+    }
+
     private static String createBannerPhotoBase64(int w, int h) throws Exception {
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = img.createGraphics();

@@ -11,20 +11,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GeometryOracleTest {
 
     @Test
-    void blockFixturesPassGeometryOracle() throws Exception {
+    void blockAndFlexFixturesPassGeometryOracle() throws Exception {
         GeometryOracle oracle = new GeometryOracle();
-        GeometryOracle.SuiteReport report = oracle.runSuite(
-                List.of(
-                        "/fixtures/geometry/block-basic.json",
-                        "/fixtures/geometry/block-margin-collapse.json"
-                ),
-                new LayoutEngine()
+        List<String> fixtures = List.of(
+                "/fixtures/geometry/block-basic.json",
+                "/fixtures/geometry/block-margin-collapse.json",
+                "/fixtures/geometry/flex-row-space-between.json",
+                "/fixtures/geometry/flex-grow-gap.json",
+                "/fixtures/geometry/flex-shrink.json",
+                "/fixtures/geometry/flex-wrap.json",
+                "/fixtures/geometry/flex-column.json"
         );
+        GeometryOracle.SuiteReport report = oracle.runSuite(fixtures, new LayoutEngine());
 
         for (GeometryOracle.FixtureResult res : report.results()) {
             assertTrue(res.passed(), () -> res.name() + " failed:\n" + String.join("\n", res.mismatches()));
         }
-        assertEquals(2, report.passed());
+        assertEquals(fixtures.size(), report.passed());
         assertEquals(100.0, report.passRatePercent(), 0.01);
     }
 }
