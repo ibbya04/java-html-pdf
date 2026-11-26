@@ -38,6 +38,8 @@ public final class UserAgentStylesheet {
             em, i { font-style: italic; }
             code { font-family: monospace; }
             a { color: #0000ee; text-decoration: underline; }
+            table { display: table; border-collapse: collapse; }
+            th { font-weight: bold; text-align: left; }
             """;
 
     public static CssStylesheet load() {

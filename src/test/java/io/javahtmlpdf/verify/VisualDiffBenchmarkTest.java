@@ -420,6 +420,115 @@ class VisualDiffBenchmarkTest {
         }
     }
 
+    @Test
+    void tableLayoutMatchesHeadlessChrome() throws Exception {
+        VisualDiffBenchmark benchmark = new VisualDiffBenchmark();
+        Assumptions.assumeTrue(
+                benchmark.findChromeBinary().isPresent(),
+                "Skipping Tier 3 visual diff: Chrome/Chromium not installed"
+        );
+
+        byte[] ttfBytes;
+        try (InputStream in = getClass().getResourceAsStream("/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf")) {
+            Assumptions.assumeTrue(in != null, "Bundled LiberationSans-Regular.ttf not found");
+            ttfBytes = in.readAllBytes();
+        }
+        String fontBase64 = Base64.getEncoder().encodeToString(ttfBytes);
+
+        String html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8" />
+                  <style>
+                    @page { size: A4; margin: 48px; }
+                    @font-face {
+                      font-family: 'LibSans';
+                      src: url('data:font/ttf;base64,%s') format('truetype');
+                    }
+                    * { box-sizing: border-box; }
+                    body { margin: 0; font-family: 'LibSans', sans-serif; font-size: 13px; color: #1f2937; background: #fff; }
+                    h2 { margin: 0 0 12px 0; font-size: 18px; font-weight: normal; color: #111827; }
+                    table { width: 100%%; border-collapse: collapse; }
+                    th {
+                      background: #f3f4f6;
+                      color: #374151;
+                      font-weight: normal;
+                      text-align: left;
+                      padding: 10px 12px;
+                      border-bottom: 2px solid #d1d5db;
+                    }
+                    td {
+                      padding: 9px 12px;
+                      border-bottom: 1px solid #e5e7eb;
+                    }
+                    .num { text-align: right; }
+                    .col-item { width: 55%%; }
+                    .col-qty { width: 15%%; }
+                    .col-price { width: 30%%; }
+                  </style>
+                </head>
+                <body>
+                  <h2>Invoice Line Items</h2>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th class="col-item">Description</th>
+                        <th class="col-qty num">Qty</th>
+                        <th class="col-price num">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Cloud Infrastructure Hosting</td>
+                        <td class="num">1</td>
+                        <td class="num">$1,200.00</td>
+                      </tr>
+                      <tr>
+                        <td>PDF Rendering Engine License</td>
+                        <td class="num">3</td>
+                        <td class="num">$900.00</td>
+                      </tr>
+                      <tr>
+                        <td>Priority Support Plan</td>
+                        <td class="num">1</td>
+                        <td class="num">$450.00</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </body>
+                </html>
+                """.formatted(fontBase64);
+
+        Path tempHtml = Files.createTempFile("table-benchmark-", ".html");
+        try {
+            Files.writeString(tempHtml, html, StandardCharsets.UTF_8);
+            byte[] chromePdf = benchmark.renderWithChrome(tempHtml);
+
+            RenderResult actual = HtmlToPdf.builder()
+                    .html(html)
+                    .pageSize(PageSize.A4)
+                    .font("LibSans", false, false, ttfBytes)
+                    .render();
+
+            VisualDiffBenchmark.BenchmarkReport report =
+                    benchmark.comparePdfs("table-benchmark", chromePdf, actual.pdfBytes());
+
+            System.out.printf("Phase 3A Visual Diff Benchmark (table-benchmark): %.2f%% pixel similarity (diff: %s)%n",
+                    report.averageSimilarityPercent(), report.pages().getFirst().diffImage());
+
+            assertEquals(1, report.referencePages());
+            assertEquals(1, report.actualPages());
+            assertTrue(
+                    report.averageSimilarityPercent() >= 96.0,
+                    () -> String.format("Expected >= 96.0%% visual similarity with Chrome, got %.2f%% (diff: %s)",
+                            report.averageSimilarityPercent(), report.pages().getFirst().diffImage())
+            );
+        } finally {
+            Files.deleteIfExists(tempHtml);
+        }
+    }
+
     private static String createBannerPhotoBase64(int w, int h) throws Exception {
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = img.createGraphics();

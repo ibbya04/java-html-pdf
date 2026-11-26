@@ -141,6 +141,23 @@ public final class StyleResolver {
         Map<String, String> rawProps = computeElementProperties(element, rules, parentRawProps, reportedUnsupported, diagnostics);
         LayoutStyle style = buildLayoutStyle(rawProps, parentStyle, rootFontSizePx);
         String tag = element.tagName().toLowerCase(Locale.ROOT);
+        TableRole tableRole = switch (tag) {
+            case "table" -> TableRole.TABLE;
+            case "thead" -> TableRole.THEAD;
+            case "tbody" -> TableRole.TBODY;
+            case "tfoot" -> TableRole.TFOOT;
+            case "tr" -> TableRole.TR;
+            case "th" -> TableRole.TH;
+            case "td" -> TableRole.TD;
+            default -> TableRole.NONE;
+        };
+        if (tableRole != TableRole.NONE) {
+            int colSpan = 1;
+            if (element.hasAttr("colspan")) {
+                colSpan = Math.max(1, (int) parseFloatOr(element.attr("colspan"), 1f));
+            }
+            style = style.withTableRole(tableRole, colSpan);
+        }
         String id = element.id().isBlank() ? tag : element.id();
 
         if (style.display() == Display.NONE) {
