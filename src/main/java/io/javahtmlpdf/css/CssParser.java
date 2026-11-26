@@ -1,6 +1,9 @@
 package io.javahtmlpdf.css;
 
+import io.javahtmlpdf.model.MarginBoxSpec;
+
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -21,6 +24,7 @@ public final class CssParser {
         String cleaned = stripComments(css);
         List<CssRule> rules = new ArrayList<>();
         Map<String, String> pageDeclarations = new LinkedHashMap<>();
+        Map<MarginBoxSpec.Position, Map<String, String>> pageMarginBoxes = new EnumMap<>(MarginBoxSpec.Position.class);
 
         int pos = 0;
         int len = cleaned.length();
@@ -44,9 +48,7 @@ public final class CssParser {
                 if (braceClose < 0) break;
                 String block = cleaned.substring(braceOpen + 1, braceClose);
                 if (prelude.startsWith("@page")) {
-                    for (CssRule.Declaration decl : parseDeclarations(block)) {
-                        pageDeclarations.put(decl.property(), decl.value());
-                    }
+                    parsePageBlock(block, pageDeclarations, pageMarginBoxes);
                 }
                 pos = braceClose + 1;
                 continue;
@@ -72,7 +74,61 @@ public final class CssParser {
             pos = braceClose + 1;
         }
 
-        return new CssStylesheet(rules, pageDeclarations);
+        return new CssStylesheet(rules, pageDeclarations, pageMarginBoxes);
+    }
+
+    private static void parsePageBlock(
+            String block,
+            Map<String, String> pageDeclarations,
+            Map<MarginBoxSpec.Position, Map<String, String>> marginBoxes
+    ) {
+        StringBuilder topLevelDecls = new StringBuilder();
+        int pos = 0;
+        int len = block.length();
+        while (pos < len) {
+            pos = skipWhitespace(block, pos);
+            if (pos >= len) break;
+            if (block.charAt(pos) == '@') {
+                int open = block.indexOf('{', pos);
+                if (open < 0) break;
+                int close = findMatchingBrace(block, open);
+                if (close < 0) break;
+                String name = block.substring(pos, open).trim().toLowerCase(Locale.ROOT);
+                String inner = block.substring(open + 1, close);
+                MarginBoxSpec.Position mbPos = parseMarginBoxPosition(name);
+                if (mbPos != null) {
+                    Map<String, String> declMap = marginBoxes.computeIfAbsent(mbPos, k -> new LinkedHashMap<>());
+                    for (CssRule.Declaration d : parseDeclarations(inner)) {
+                        declMap.put(d.property(), d.value());
+                    }
+                }
+                pos = close + 1;
+            } else {
+                int nextAt = block.indexOf('@', pos);
+                if (nextAt < 0) {
+                    topLevelDecls.append(block, pos, len);
+                    break;
+                } else {
+                    topLevelDecls.append(block, pos, nextAt);
+                    pos = nextAt;
+                }
+            }
+        }
+        for (CssRule.Declaration decl : parseDeclarations(topLevelDecls.toString())) {
+            pageDeclarations.put(decl.property(), decl.value());
+        }
+    }
+
+    private static MarginBoxSpec.Position parseMarginBoxPosition(String atRuleName) {
+        return switch (atRuleName) {
+            case "@top-left" -> MarginBoxSpec.Position.TOP_LEFT;
+            case "@top-center" -> MarginBoxSpec.Position.TOP_CENTER;
+            case "@top-right" -> MarginBoxSpec.Position.TOP_RIGHT;
+            case "@bottom-left" -> MarginBoxSpec.Position.BOTTOM_LEFT;
+            case "@bottom-center" -> MarginBoxSpec.Position.BOTTOM_CENTER;
+            case "@bottom-right" -> MarginBoxSpec.Position.BOTTOM_RIGHT;
+            default -> null;
+        };
     }
 
     public static List<CssRule.Declaration> parseDeclarations(String block) {

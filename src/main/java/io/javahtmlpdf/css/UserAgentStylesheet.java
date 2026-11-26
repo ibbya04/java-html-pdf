@@ -26,10 +26,10 @@ public final class UserAgentStylesheet {
                 color: #000000;
                 font-family: sans-serif;
             }
-            h1 { font-size: 2em; font-weight: bold; margin: 0.67em 0; }
-            h2 { font-size: 1.5em; font-weight: bold; margin: 0.83em 0; }
-            h3 { font-size: 1.17em; font-weight: bold; margin: 1em 0; }
-            h4 { font-size: 1em; font-weight: bold; margin: 1.33em 0; }
+            h1 { font-size: 2em; font-weight: bold; margin: 0.67em 0; break-after: avoid; }
+            h2 { font-size: 1.5em; font-weight: bold; margin: 0.83em 0; break-after: avoid; }
+            h3 { font-size: 1.17em; font-weight: bold; margin: 1em 0; break-after: avoid; }
+            h4 { font-size: 1em; font-weight: bold; margin: 1.33em 0; break-after: avoid; }
             p { margin: 1em 0; }
             blockquote { margin: 1em 40px; }
             ul, ol { margin: 1em 0; padding-left: 40px; }

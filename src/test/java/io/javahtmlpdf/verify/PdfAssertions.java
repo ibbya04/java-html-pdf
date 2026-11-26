@@ -53,6 +53,18 @@ public final class PdfAssertions implements AutoCloseable {
         return this;
     }
 
+    public PdfAssertions pageContainsText(int zeroBasedPageIndex, String expectedSubstring) throws IOException {
+        PDFTextStripper stripper = new PDFTextStripper();
+        stripper.setStartPage(zeroBasedPageIndex + 1);
+        stripper.setEndPage(zeroBasedPageIndex + 1);
+        String pageText = stripper.getText(document);
+        assertTrue(
+                pageText.contains(expectedSubstring),
+                () -> "Expected page " + (zeroBasedPageIndex + 1) + " to contain '" + expectedSubstring + "' but got:\n" + pageText
+        );
+        return this;
+    }
+
     public PdfAssertions containsTextInOrder(String first, String second) {
         int idx1 = extractedText.indexOf(first);
         int idx2 = extractedText.indexOf(second);

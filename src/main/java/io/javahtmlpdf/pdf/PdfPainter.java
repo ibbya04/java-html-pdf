@@ -8,6 +8,8 @@ import io.javahtmlpdf.model.InlineRun;
 import io.javahtmlpdf.model.LayoutBox;
 import io.javahtmlpdf.model.LayoutStyle;
 import io.javahtmlpdf.model.LineBox;
+import io.javahtmlpdf.model.MarginBoxSpec;
+import io.javahtmlpdf.model.PageSheet;
 import io.javahtmlpdf.model.Rect;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -21,6 +23,7 @@ import org.apache.pdfbox.pdmodel.interactive.annotation.PDBorderStyleDictionary;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Paints a laid-out {@link LayoutBox} tree onto a PDF document using Apache PDFBox.
@@ -45,17 +48,73 @@ public class PdfPainter {
             PageSize pageSize,
             FontRegistry.LoadedFonts fonts
     ) throws IOException {
-        PDPage page = new PDPage(new PDRectangle(pageSize.widthPt(), pageSize.heightPt()));
-        doc.addPage(page);
+        return paintDocument(doc, List.of(new PageSheet(1, 1, pageSize, Edges.ZERO, List.of(root), List.of())), fonts);
+    }
 
-        try (PDPageContentStream stream = new PDPageContentStream(doc, page)) {
-            paintBox(doc, page, stream, root, pageSize.heightPt(), fonts);
+    public byte[] paintDocument(
+            PDDocument doc,
+            List<PageSheet> sheets,
+            FontRegistry.LoadedFonts fonts
+    ) throws IOException {
+        for (PageSheet sheet : sheets) {
+            PageSize ps = sheet.pageSize();
+            PDPage page = new PDPage(new PDRectangle(ps.widthPt(), ps.heightPt()));
+            doc.addPage(page);
+
+            try (PDPageContentStream stream = new PDPageContentStream(doc, page)) {
+                for (LayoutBox box : sheet.contentBoxes()) {
+                    paintBox(doc, page, stream, box, ps.heightPt(), fonts);
+                }
+                for (MarginBoxSpec mb : sheet.marginBoxes()) {
+                    paintMarginBox(stream, sheet, mb, fonts);
+                }
+            }
         }
 
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             doc.save(out);
             return out.toByteArray();
         }
+    }
+
+    private void paintMarginBox(
+            PDPageContentStream stream,
+            PageSheet sheet,
+            MarginBoxSpec mb,
+            FontRegistry.LoadedFonts fonts
+    ) throws IOException {
+        String text = mb.evaluateText(sheet.pageNumber(), sheet.totalPages());
+        if (text.isEmpty()) return;
+
+        PDFont font = fonts.resolve(mb.fontFamily(), false, false);
+        String safe = fonts.sanitizeForFont(font, text);
+        float fontSizePt = mb.fontSizePx() * PageSize.PX_TO_PT;
+        float textWidthPt = fonts.measureWidthPx(font, mb.fontSizePx(), safe) * PageSize.PX_TO_PT;
+
+        PageSize ps = sheet.pageSize();
+        Edges m = sheet.marginsPx();
+        float leftPt = Math.max(18f, m.left() * PageSize.PX_TO_PT);
+        float rightPt = ps.widthPt() - Math.max(18f, m.right() * PageSize.PX_TO_PT);
+
+        float xPt = switch (mb.position()) {
+            case TOP_LEFT, BOTTOM_LEFT -> leftPt;
+            case TOP_CENTER, BOTTOM_CENTER -> (ps.widthPt() - textWidthPt) / 2f;
+            case TOP_RIGHT, BOTTOM_RIGHT -> rightPt - textWidthPt;
+        };
+
+        float topMarginPt = Math.max(24f, m.top() * PageSize.PX_TO_PT);
+        float bottomMarginPt = Math.max(24f, m.bottom() * PageSize.PX_TO_PT);
+        float yPt = switch (mb.position()) {
+            case TOP_LEFT, TOP_CENTER, TOP_RIGHT -> ps.heightPt() - (topMarginPt / 2f) - (fontSizePt / 3f);
+            case BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT -> (bottomMarginPt / 2f) - (fontSizePt / 3f);
+        };
+
+        stream.setNonStrokingColor(mb.color().toAwtColor());
+        stream.beginText();
+        stream.setFont(font, fontSizePt);
+        stream.newLineAtOffset(xPt, yPt);
+        stream.showText(safe);
+        stream.endText();
     }
 
     private void paintBox(

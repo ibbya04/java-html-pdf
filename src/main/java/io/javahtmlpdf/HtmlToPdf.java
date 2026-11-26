@@ -3,8 +3,10 @@ package io.javahtmlpdf;
 import io.javahtmlpdf.css.StyleResolver;
 import io.javahtmlpdf.font.FontRegistry;
 import io.javahtmlpdf.layout.LayoutEngine;
+import io.javahtmlpdf.layout.Paginator;
 import io.javahtmlpdf.model.Edges;
 import io.javahtmlpdf.model.LayoutBox;
+import io.javahtmlpdf.model.PageSheet;
 import io.javahtmlpdf.pdf.PdfPainter;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.jsoup.Jsoup;
@@ -104,7 +106,10 @@ public final class HtmlToPdf {
                         pageMargins.top(),
                         loadedFonts
                 );
-                byte[] pdfBytes = new PdfPainter().paintSinglePage(pdDoc, laidOut, effectivePage, loadedFonts);
+                List<PageSheet> sheets = new Paginator().paginate(
+                        laidOut, effectivePage, pageMargins, resolved.marginBoxes()
+                );
+                byte[] pdfBytes = new PdfPainter().paintDocument(pdDoc, sheets, loadedFonts);
                 return new RenderResult(pdfBytes, diagnostics);
             }
         }

@@ -8,8 +8,10 @@ import io.javahtmlpdf.model.Display;
 import io.javahtmlpdf.model.Edges;
 import io.javahtmlpdf.model.FlexProps;
 import io.javahtmlpdf.model.GridProps;
+import io.javahtmlpdf.model.LayoutBox;
 import io.javahtmlpdf.model.LayoutNode;
 import io.javahtmlpdf.model.LayoutStyle;
+import io.javahtmlpdf.model.MarginBoxSpec;
 import io.javahtmlpdf.model.TableRole;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -37,7 +39,8 @@ public final class StyleResolver {
     public record ResolvedDocument(
             LayoutNode root,
             PageSize pageSize,
-            Edges pageMarginsPx
+            Edges pageMarginsPx,
+            List<MarginBoxSpec> marginBoxes
     ) {}
 
     private static final Set<String> SUPPORTED_PROPERTIES = Set.of(
@@ -75,6 +78,7 @@ public final class StyleResolver {
     ) {
         List<CssRule> allRules = new ArrayList<>();
         Map<String, String> pageDecls = new HashMap<>();
+        Map<MarginBoxSpec.Position, Map<String, String>> rawMarginBoxes = new HashMap<>();
 
         CssStylesheet ua = UserAgentStylesheet.load();
         allRules.addAll(ua.rules());
@@ -87,6 +91,7 @@ public final class StyleResolver {
                 CssStylesheet sheet = CssParser.parse(el.data(), false, nextOrder);
                 allRules.addAll(sheet.rules());
                 pageDecls.putAll(sheet.pageDeclarations());
+                sheet.pageMarginBoxes().forEach((k, v) -> rawMarginBoxes.computeIfAbsent(k, p -> new HashMap<>()).putAll(v));
                 nextOrder += sheet.rules().size() + 1;
             } else if ("link".equalsIgnoreCase(el.tagName())) {
                 String href = el.attr("href");
@@ -97,6 +102,7 @@ public final class StyleResolver {
                         CssStylesheet sheet = CssParser.parse(cssText, false, nextOrder);
                         allRules.addAll(sheet.rules());
                         pageDecls.putAll(sheet.pageDeclarations());
+                        sheet.pageMarginBoxes().forEach((k, v) -> rawMarginBoxes.computeIfAbsent(k, p -> new HashMap<>()).putAll(v));
                         nextOrder += sheet.rules().size() + 1;
                     } else {
                         diagnostics.add(RenderDiagnostic.warning("MISSING_STYLESHEET", "Could not load stylesheet: " + href));
@@ -124,7 +130,28 @@ public final class StyleResolver {
                 ? new LayoutNode("body", rootStyle, null, List.of())
                 : buildNode(bodyEl, allRules, Map.of(), rootStyle, rootFontSizePx, null, resourceLoader, reportedUnsupported, diagnostics);
 
-        return new ResolvedDocument(bodyNode, resolvedPageSize, pageMargins);
+        List<MarginBoxSpec> marginBoxes = resolveMarginBoxes(rawMarginBoxes, bodyNode.style().fontFamily());
+        return new ResolvedDocument(bodyNode, resolvedPageSize, pageMargins, marginBoxes);
+    }
+
+    private static List<MarginBoxSpec> resolveMarginBoxes(
+            Map<MarginBoxSpec.Position, Map<String, String>> raw,
+            String defaultFontFamily
+    ) {
+        List<MarginBoxSpec> out = new ArrayList<>();
+        for (Map.Entry<MarginBoxSpec.Position, Map<String, String>> entry : raw.entrySet()) {
+            Map<String, String> props = entry.getValue();
+            String content = props.get("content");
+            if (content == null || content.isBlank() || "none".equalsIgnoreCase(content.trim())) {
+                continue;
+            }
+            CssColor color = CssColor.parse(props.get("color")).orElse(new CssColor(107, 114, 128, 1f));
+            float fontSize = resolveLengthPx(props.get("font-size"), 11f, 16f);
+            if (fontSize <= 0f) fontSize = 11f;
+            String fontFamily = props.getOrDefault("font-family", defaultFontFamily);
+            out.add(new MarginBoxSpec(entry.getKey(), content, color, fontSize, fontFamily));
+        }
+        return out;
     }
 
     private LayoutNode buildNode(
