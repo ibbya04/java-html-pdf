@@ -231,7 +231,7 @@ final class FlexLayout {
             // Compute main-axis justification offsets
             float sumFinalOuter = 0f;
             for (FlexItem item : line) sumFinalOuter += item.outerTargetMain();
-            float remainingMain = availableMain != null ? Math.max(0f, availableMain - sumFinalOuter - totalGaps) : 0f;
+            float remainingMain = availableMain != null ? (availableMain - sumFinalOuter - totalGaps) : 0f;
             maxLineMainUsed = Math.max(maxLineMainUsed, sumFinalOuter + totalGaps);
 
             float mainCursor;
@@ -242,17 +242,25 @@ final class FlexLayout {
                 case CENTER -> mainCursor = remainingMain / 2f;
                 case SPACE_BETWEEN -> {
                     mainCursor = 0f;
-                    if (n > 1) itemGap = mainGap + (remainingMain / (n - 1));
+                    if (n > 1 && remainingMain > 0f) itemGap = mainGap + (remainingMain / (n - 1));
                 }
                 case SPACE_AROUND -> {
-                    float step = remainingMain / n;
-                    mainCursor = step / 2f;
-                    itemGap = mainGap + step;
+                    if (remainingMain > 0f) {
+                        float step = remainingMain / n;
+                        mainCursor = step / 2f;
+                        itemGap = mainGap + step;
+                    } else {
+                        mainCursor = remainingMain / 2f;
+                    }
                 }
                 case SPACE_EVENLY -> {
-                    float step = remainingMain / (n + 1);
-                    mainCursor = step;
-                    itemGap = mainGap + step;
+                    if (remainingMain > 0f) {
+                        float step = remainingMain / (n + 1);
+                        mainCursor = step;
+                        itemGap = mainGap + step;
+                    } else {
+                        mainCursor = remainingMain / 2f;
+                    }
                 }
                 default -> mainCursor = 0f;
             }
@@ -262,8 +270,8 @@ final class FlexLayout {
                 FlexItem item = ordered.get(i);
                 FlexProps.AlignItems effectiveAlign = resolveItemAlignment(item.style.flex().alignSelf(), flex.alignItems());
                 float crossOffset = switch (effectiveAlign) {
-                    case CENTER -> Math.max(0f, (lineCrossSize - item.outerCrossSize(isRow)) / 2f);
-                    case FLEX_END -> Math.max(0f, lineCrossSize - item.outerCrossSize(isRow));
+                    case CENTER -> (lineCrossSize - item.outerCrossSize(isRow)) / 2f;
+                    case FLEX_END -> lineCrossSize - item.outerCrossSize(isRow);
                     default -> 0f;
                 };
 

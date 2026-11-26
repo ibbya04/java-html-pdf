@@ -4,6 +4,7 @@ import io.javahtmlpdf.css.CssLength;
 import io.javahtmlpdf.font.FontRegistry;
 import io.javahtmlpdf.model.Display;
 import io.javahtmlpdf.model.Edges;
+import io.javahtmlpdf.model.FlexProps;
 import io.javahtmlpdf.model.GridProps;
 import io.javahtmlpdf.model.LayoutBox;
 import io.javahtmlpdf.model.LayoutNode;
@@ -135,12 +136,14 @@ final class GridLayout {
             cx += colWidths[c] + colGap;
         }
 
-        // 3. Lay out each placed item at its spanned column width to discover heights
+        // 3. Lay out each placed item at its spanned column width (preserving explicit width if set)
         for (PlacedItem item : placed) {
             float cellW = sumRange(colWidths, item.col, item.colSpan) + colGap * (item.colSpan - 1);
             Edges im = item.node.style().margin();
             float itemBorderBoxW = Math.max(0f, cellW - im.horizontal());
-            LayoutNode sized = withFixedWidth(item.node, itemBorderBoxW);
+            LayoutNode sized = item.node.style().width() == null
+                    ? withFixedWidth(item.node, itemBorderBoxW)
+                    : item.node;
             item.box = engine.layoutNodeAtOrigin(sized, cellW, fonts);
         }
 
@@ -153,7 +156,8 @@ final class GridLayout {
             ry += rowHeights[r] + rowGap;
         }
 
-        // 5. Stretch auto-height items to match their spanned row height and translate into place
+        // 5. Stretch auto-height items (when align-items is stretch) and apply cell alignment
+        FlexProps.AlignItems containerAlign = style.flex().alignItems();
         List<LayoutBox> placedBoxes = new ArrayList<>(placed.size());
         for (PlacedItem item : placed) {
             float cellW = sumRange(colWidths, item.col, item.colSpan) + colGap * (item.colSpan - 1);
@@ -161,18 +165,33 @@ final class GridLayout {
             LayoutStyle s = item.node.style();
             Edges im = s.margin();
 
+            FlexProps.AlignItems itemAlign = switch (s.flex().alignSelf()) {
+                case STRETCH -> FlexProps.AlignItems.STRETCH;
+                case FLEX_START -> FlexProps.AlignItems.FLEX_START;
+                case FLEX_END -> FlexProps.AlignItems.FLEX_END;
+                case CENTER -> FlexProps.AlignItems.CENTER;
+                case AUTO -> containerAlign;
+            };
+
             LayoutBox finalBox = item.box;
-            if (s.height() == null && !item.node.isImageNode()) {
+            if (itemAlign == FlexProps.AlignItems.STRETCH && s.height() == null && !item.node.isImageNode()) {
                 float stretchedH = Math.max(0f, cellH - im.vertical());
                 if (Math.abs(stretchedH - finalBox.borderBox().height()) > 0.05f) {
-                    float itemBorderBoxW = Math.max(0f, cellW - im.horizontal());
+                    float itemBorderBoxW = s.width() == null ? Math.max(0f, cellW - im.horizontal()) : finalBox.borderBox().width();
                     LayoutNode stretched = withFixedDimensions(item.node, itemBorderBoxW, stretchedH);
                     finalBox = engine.layoutNodeAtOrigin(stretched, cellW, fonts);
                 }
             }
 
+            float outerH = finalBox.borderBox().height() + im.vertical();
+            float alignOffsetY = switch (itemAlign) {
+                case CENTER -> (cellH - outerH) / 2f;
+                case FLEX_END -> cellH - outerH;
+                default -> 0f;
+            };
+
             float targetX = contentX + colOffsets[item.col] + im.left();
-            float targetY = contentY + rowOffsets[item.row] + im.top();
+            float targetY = contentY + rowOffsets[item.row] + im.top() + alignOffsetY;
             float dx = targetX - finalBox.borderBox().x();
             float dy = targetY - finalBox.borderBox().y();
             placedBoxes.add(LayoutEngine.translateBox(finalBox, dx, dy));
