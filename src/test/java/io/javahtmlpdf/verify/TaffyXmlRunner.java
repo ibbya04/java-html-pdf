@@ -128,13 +128,13 @@ public final class TaffyXmlRunner {
                 continue;
             }
 
-            // Determine viewport width from <viewport> or root width
+            // Determine viewport width: null means indefinite (max-content shrink-to-fit)
             Element viewportEl = firstChildElement(rootTest, "viewport");
-            float viewportW = 800f;
+            Float viewportW = null;
             if (viewportEl != null) {
                 String vw = viewportEl.getAttribute("width");
                 if (vw != null && !vw.isBlank() && !"max-content".equals(vw) && !"min-content".equals(vw)) {
-                    viewportW = CssLength.parse(vw).map(l -> l.toPx(16f, 16f, 800f)).orElse(800f);
+                    viewportW = CssLength.parse(vw).map(l -> l.toPx(16f, 16f, 800f)).orElse(null);
                 }
             }
             if (rootDiv.hasAttribute("width")) {
@@ -146,7 +146,7 @@ public final class TaffyXmlRunner {
             LayoutBox actualRoot = engine.layout(layoutInput, viewportW);
 
             List<String> mismatches = new ArrayList<>();
-            compareRelative(rootExp, actualRoot, 0f, 0f, 1.0f, mismatches);
+            compareRelative(rootDiv, rootExp, actualRoot, 0f, 0f, 1.0f, mismatches);
 
             tested++;
             if (mismatches.isEmpty()) {
@@ -301,6 +301,7 @@ public final class TaffyXmlRunner {
     }
 
     private static void compareRelative(
+            Element inputEl,
             Element expNode,
             LayoutBox actual,
             float parentAbsX,
@@ -327,14 +328,32 @@ public final class TaffyXmlRunner {
             return;
         }
 
+        List<Element> inputChildren = anyChildElements(inputEl);
         List<Element> expChildren = childElements(expNode, "node");
-        if (expChildren.size() != actual.children().size()) {
-            mismatches.add(actual.id() + " child count expected=" + expChildren.size() + " got=" + actual.children().size());
+        List<Element> visibleInputChildren = new ArrayList<>();
+        List<Element> visibleExpChildren = new ArrayList<>();
+        for (int i = 0; i < Math.min(inputChildren.size(), expChildren.size()); i++) {
+            if (!"none".equalsIgnoreCase(inputChildren.get(i).getAttribute("display"))) {
+                visibleInputChildren.add(inputChildren.get(i));
+                visibleExpChildren.add(expChildren.get(i));
+            }
+        }
+        if (visibleExpChildren.size() != actual.children().size()) {
+            mismatches.add(actual.id() + " child count expected=" + visibleExpChildren.size() + " got=" + actual.children().size());
             return;
         }
-        for (int i = 0; i < expChildren.size(); i++) {
-            compareRelative(expChildren.get(i), actual.children().get(i), r.x(), r.y(), tol, mismatches);
+        for (int i = 0; i < visibleExpChildren.size(); i++) {
+            compareRelative(visibleInputChildren.get(i), visibleExpChildren.get(i), actual.children().get(i), r.x(), r.y(), tol, mismatches);
         }
+    }
+
+    private static List<Element> anyChildElements(Element parent) {
+        List<Element> out = new ArrayList<>();
+        NodeList list = parent.getChildNodes();
+        for (int i = 0; i < list.getLength(); i++) {
+            if (list.item(i) instanceof Element e) out.add(e);
+        }
+        return out;
     }
 
     private static void printReport(SuiteStats stats) {
@@ -429,8 +448,8 @@ public final class TaffyXmlRunner {
     private static FlexProps.AlignSelf parseAlignSelf(String v) {
         return switch (v) {
             case "stretch" -> FlexProps.AlignSelf.STRETCH;
-            case "flex-start", "start" -> FlexProps.AlignSelf.FLEX_START;
-            case "flex-end", "end" -> FlexProps.AlignSelf.FLEX_END;
+            case "flex-start", "start", "self-start" -> FlexProps.AlignSelf.FLEX_START;
+            case "flex-end", "end", "self-end" -> FlexProps.AlignSelf.FLEX_END;
             case "center" -> FlexProps.AlignSelf.CENTER;
             default -> FlexProps.AlignSelf.AUTO;
         };

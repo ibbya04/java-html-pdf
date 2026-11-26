@@ -33,6 +33,10 @@ public class LayoutEngine {
     private final TableLayout tableLayout = new TableLayout(this);
 
     public LayoutBox layout(LayoutNode root, float viewportWidthPx) {
+        return layout(root, Float.valueOf(viewportWidthPx), 0f, 0f, null);
+    }
+
+    public LayoutBox layout(LayoutNode root, Float viewportWidthPx) {
         return layout(root, viewportWidthPx, 0f, 0f, null);
     }
 
@@ -43,10 +47,24 @@ public class LayoutEngine {
             float startY,
             FontRegistry.LoadedFonts fonts
     ) {
+        return layout(root, Float.valueOf(viewportWidthPx), startX, startY, fonts);
+    }
+
+    public LayoutBox layout(
+            LayoutNode root,
+            Float viewportWidthPx,
+            float startX,
+            float startY,
+            FontRegistry.LoadedFonts fonts
+    ) {
         return layoutNode(root, startX, startY, viewportWidthPx, fonts);
     }
 
     LayoutBox layoutNodeAtOrigin(LayoutNode node, float containingWidth, FontRegistry.LoadedFonts fonts) {
+        return layoutNode(node, 0f, 0f, Float.valueOf(containingWidth), fonts);
+    }
+
+    LayoutBox layoutNodeAtOrigin(LayoutNode node, Float containingWidth, FontRegistry.LoadedFonts fonts) {
         return layoutNode(node, 0f, 0f, containingWidth, fonts);
     }
 
@@ -54,7 +72,7 @@ public class LayoutEngine {
             LayoutNode node,
             float originX,
             float originY,
-            float containingWidth,
+            Float containingWidth,
             FontRegistry.LoadedFonts fonts
     ) {
         Display display = node.style().display();
@@ -62,7 +80,7 @@ public class LayoutEngine {
             return new LayoutBox(node.id(), node.style(), Rect.ZERO, List.of(), null, null, List.of());
         }
         if (node.isImageNode()) {
-            return layoutImage(node, originX, originY, containingWidth);
+            return layoutImage(node, originX, originY, containingWidth == null ? 800f : containingWidth);
         }
         if (display == Display.FLEX) {
             return flexLayout.layout(node, originX, originY, containingWidth, fonts);
@@ -71,7 +89,7 @@ public class LayoutEngine {
             return gridLayout.layout(node, originX, originY, containingWidth, fonts);
         }
         if (display == Display.TABLE) {
-            return tableLayout.layout(node, originX, originY, containingWidth, fonts);
+            return tableLayout.layout(node, originX, originY, containingWidth == null ? 800f : containingWidth, fonts);
         }
         return layoutBlock(node, originX, originY, containingWidth, fonts);
     }
@@ -80,13 +98,17 @@ public class LayoutEngine {
             LayoutNode node,
             float originX,
             float originY,
-            float containingWidth,
+            Float containingWidthObj,
             FontRegistry.LoadedFonts fonts
     ) {
         LayoutStyle style = node.style();
         if (style.display() == Display.NONE) {
             return new LayoutBox(node.id(), style, Rect.ZERO, List.of(), null, null, List.of());
         }
+
+        float containingWidth = containingWidthObj != null
+                ? containingWidthObj
+                : measureMaxContentWidth(node, 800f, fonts) + style.margin().horizontal();
 
         if (node.isImageNode()) {
             return layoutImage(node, originX, originY, containingWidth);
@@ -277,15 +299,28 @@ public class LayoutEngine {
             float maxBorderBox = style.borderBox() ? maxW : maxW + padding.horizontal() + border.horizontal();
             width = Math.min(width, maxBorderBox);
         }
+        if (style.minWidth() != null) {
+            float minW = style.minWidth().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, containingWidth);
+            float minBorderBox = style.borderBox() ? minW : minW + padding.horizontal() + border.horizontal();
+            width = Math.max(width, minBorderBox);
+        }
         return width;
     }
 
     float resolveBorderBoxHeight(LayoutStyle style, float contentHeight, Edges padding, Edges border) {
+        float h;
         if (style.height() != null) {
             float raw = style.height().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, contentHeight);
-            return style.borderBox() ? raw : raw + padding.vertical() + border.vertical();
+            h = style.borderBox() ? raw : raw + padding.vertical() + border.vertical();
+        } else {
+            h = border.vertical() + padding.vertical() + contentHeight;
         }
-        return border.vertical() + padding.vertical() + contentHeight;
+        if (style.minHeight() != null) {
+            float minH = style.minHeight().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, contentHeight);
+            float minBorderBox = style.borderBox() ? minH : minH + padding.vertical() + border.vertical();
+            h = Math.max(h, minBorderBox);
+        }
+        return h;
     }
 
     /**
@@ -295,9 +330,10 @@ public class LayoutEngine {
         LayoutStyle s = node.style();
         Edges p = s.padding();
         Edges b = s.border();
-        if (s.width() != null && !s.width().isAuto()) {
+        if (s.width() != null && !s.width().isAuto() && !s.width().isPercent()) {
             float raw = s.width().toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, maxAvailableWidth);
-            return s.borderBox() ? raw : raw + p.horizontal() + b.horizontal();
+            float w = s.borderBox() ? raw : raw + p.horizontal() + b.horizontal();
+            return clampMinMaxWidth(w, s, maxAvailableWidth);
         }
         if (node.isImageNode()) {
             LayoutBox imgBox = layoutImage(node, 0f, 0f, maxAvailableWidth);
@@ -305,6 +341,23 @@ public class LayoutEngine {
         }
         if (node.isTextNode()) {
             return measureWidth(node.text(), s, fonts);
+        }
+
+        // Row Flexbox max-content width = sum of children's max-content widths + gaps
+        if (s.display() == Display.FLEX && s.flex().isRow()) {
+            float sum = 0f;
+            int visible = 0;
+            for (LayoutNode child : node.children()) {
+                if (child.style().display() == Display.NONE) continue;
+                float cw = measureFlexChildMaxContentWidth(child, maxAvailableWidth, fonts)
+                        + child.style().margin().horizontal();
+                sum += cw;
+                visible++;
+            }
+            if (visible > 1) {
+                sum += s.flex().columnGapPx() * (visible - 1);
+            }
+            return clampMinMaxWidth(sum + p.horizontal() + b.horizontal(), s, maxAvailableWidth);
         }
 
         float maxChildWidth = 0f;
@@ -320,7 +373,30 @@ public class LayoutEngine {
                 maxChildWidth = Math.max(maxChildWidth, cw);
             }
         }
-        return maxChildWidth + p.horizontal() + b.horizontal();
+        return clampMinMaxWidth(maxChildWidth + p.horizontal() + b.horizontal(), s, maxAvailableWidth);
+    }
+
+    private float measureFlexChildMaxContentWidth(LayoutNode child, float maxAvailableWidth, FontRegistry.LoadedFonts fonts) {
+        LayoutStyle s = child.style();
+        CssLength basis = s.flex().flexBasis();
+        if (basis != null && !basis.isAuto() && !basis.isPercent()) {
+            float raw = basis.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, maxAvailableWidth);
+            float w = s.borderBox() ? raw : raw + s.padding().horizontal() + s.border().horizontal();
+            return clampMinMaxWidth(w, s, maxAvailableWidth);
+        }
+        return measureMaxContentWidth(child, maxAvailableWidth, fonts);
+    }
+
+    private float clampMinMaxWidth(float w, LayoutStyle s, float pctBase) {
+        if (s.maxWidth() != null && !s.maxWidth().isPercent()) {
+            float maxW = s.maxWidth().toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+            w = Math.min(w, s.borderBox() ? maxW : maxW + s.padding().horizontal() + s.border().horizontal());
+        }
+        if (s.minWidth() != null && !s.minWidth().isPercent()) {
+            float minW = s.minWidth().toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+            w = Math.max(w, s.borderBox() ? minW : minW + s.padding().horizontal() + s.border().horizontal());
+        }
+        return w;
     }
 
     private float measureInlineTreeWidth(LayoutNode node, FontRegistry.LoadedFonts fonts) {

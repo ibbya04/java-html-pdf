@@ -17,8 +17,9 @@ import java.util.List;
 /**
  * Pure-Java CSS Flexbox (1D) Formatting Context layout solver.
  * Supports {@code flex-direction}, {@code flex-wrap}, {@code justify-content},
- * {@code align-items}, {@code align-self}, {@code flex-grow}, {@code flex-shrink},
- * {@code flex-basis}, and {@code gap}.
+ * {@code align-items}, {@code align-self}, {@code flex-grow}, {@code flex-shrink}
+ * (with min/max freeze-and-redistribute), {@code flex-basis}, {@code gap}, and
+ * both definite and indefinite ({@code max-content}) container sizing.
  */
 final class FlexLayout {
 
@@ -37,12 +38,14 @@ final class FlexLayout {
         final float mainMarginEnd;
         final float crossMarginStart;
         final float crossMarginEnd;
-        float baseMainSize;       // hypothetical border-box main size
-        float targetMainSize;     // resolved border-box main size after grow/shrink
-        float minMainSize;
+        final float baseMainSize;
+        final float minMainSize;
+        final float maxMainSize;
+        float targetMainSize;
+        boolean frozen;
         LayoutBox laidOutBox;
 
-        FlexItem(LayoutNode node, boolean isRow, float baseMainSize, float minMainSize) {
+        FlexItem(LayoutNode node, boolean isRow, float baseMainSize, float minMainSize, float maxMainSize) {
             this.node = node;
             this.style = node.style();
             Edges m = style.margin();
@@ -51,12 +54,13 @@ final class FlexLayout {
             this.crossMarginStart = isRow ? m.top() : m.left();
             this.crossMarginEnd = isRow ? m.bottom() : m.right();
             this.baseMainSize = baseMainSize;
-            this.targetMainSize = baseMainSize;
             this.minMainSize = minMainSize;
+            this.maxMainSize = maxMainSize;
+            this.targetMainSize = clamp(baseMainSize, minMainSize, maxMainSize);
         }
 
-        float outerBaseMain() {
-            return baseMainSize + mainMarginStart + mainMarginEnd;
+        float outerHypotheticalMain() {
+            return clamp(baseMainSize, minMainSize, maxMainSize) + mainMarginStart + mainMarginEnd;
         }
 
         float outerTargetMain() {
@@ -76,7 +80,7 @@ final class FlexLayout {
             LayoutNode container,
             float originX,
             float originY,
-            float containingWidth,
+            Float containingWidthObj,
             FontRegistry.LoadedFonts fonts
     ) {
         LayoutStyle style = container.style();
@@ -85,52 +89,68 @@ final class FlexLayout {
         Edges padding = style.padding();
         Edges border = style.border();
 
-        float borderBoxWidth = engine.resolveBorderBoxWidth(style, containingWidth, margin, padding, border);
+        boolean definiteWidth = (style.width() != null && !style.width().isAuto()) || containingWidthObj != null;
+        float containingWidth = containingWidthObj != null ? containingWidthObj : 800f;
+
+        Float explicitContentWidth = null;
+        float borderBoxWidth = 0f;
+        if (definiteWidth) {
+            borderBoxWidth = engine.resolveBorderBoxWidth(style, containingWidth, margin, padding, border);
+            explicitContentWidth = Math.max(0f, borderBoxWidth - border.horizontal() - padding.horizontal());
+        }
+
         float marginLeft = margin.left();
-        if (style.marginLeftAuto() && style.marginRightAuto()) {
-            marginLeft = Math.max(0f, containingWidth - borderBoxWidth) / 2f;
-        } else if (style.marginLeftAuto()) {
-            marginLeft = Math.max(0f, containingWidth - borderBoxWidth - margin.right());
+        if (definiteWidth) {
+            if (style.marginLeftAuto() && style.marginRightAuto()) {
+                marginLeft = Math.max(0f, containingWidth - borderBoxWidth) / 2f;
+            } else if (style.marginLeftAuto()) {
+                marginLeft = Math.max(0f, containingWidth - borderBoxWidth - margin.right());
+            }
         }
 
         float boxX = originX + marginLeft;
         float boxY = originY + margin.top();
         float contentX = boxX + border.left() + padding.left();
         float contentY = boxY + border.top() + padding.top();
-        float contentWidth = Math.max(0f, borderBoxWidth - border.horizontal() - padding.horizontal());
 
         Float explicitContentHeight = null;
         if (style.height() != null) {
             float rawH = style.height().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, 0f);
             float borderBoxH = style.borderBox() ? rawH : rawH + padding.vertical() + border.vertical();
+            if (style.minHeight() != null) {
+                float minH = style.minHeight().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, 0f);
+                borderBoxH = Math.max(borderBoxH, style.borderBox() ? minH : minH + padding.vertical() + border.vertical());
+            }
             explicitContentHeight = Math.max(0f, borderBoxH - border.vertical() - padding.vertical());
         }
 
         boolean isRow = flex.isRow();
         float mainGap = isRow ? flex.columnGapPx() : flex.rowGapPx();
         float crossGap = isRow ? flex.rowGapPx() : flex.columnGapPx();
-        Float availableMain = isRow ? Float.valueOf(contentWidth) : explicitContentHeight;
+        Float availableMain = isRow ? explicitContentWidth : explicitContentHeight;
 
         // 1. Collect flex items and measure hypothetical main sizes
         List<FlexItem> items = new ArrayList<>();
         for (LayoutNode child : container.children()) {
             if (child.style().display() == Display.NONE) continue;
-            float baseMain = computeHypotheticalMainSize(child, isRow, contentWidth, availableMain, fonts);
-            float minMain = resolveMinMainSize(child.style(), isRow, availableMain == null ? contentWidth : availableMain);
-            items.add(new FlexItem(child, isRow, Math.max(baseMain, minMain), minMain));
+            float baseMain = computeHypotheticalMainSize(child, isRow, explicitContentWidth, availableMain, fonts);
+            float pctBase = availableMain != null ? availableMain : (explicitContentWidth != null ? explicitContentWidth : 0f);
+            float minMain = resolveMinMainSize(child, isRow, pctBase, baseMain);
+            float maxMain = resolveMaxMainSize(child.style(), isRow, pctBase);
+            items.add(new FlexItem(child, isRow, baseMain, minMain, maxMain));
         }
 
-        // 2. Partition items into flex lines (wrap vs nowrap)
+        // 2. Partition items into flex lines
         List<List<FlexItem>> lines = new ArrayList<>();
         if (items.isEmpty()) {
-            // nothing to lay out
+            // empty flex container
         } else if (flex.wrap() == FlexProps.FlexWrap.NOWRAP || availableMain == null) {
             lines.add(new ArrayList<>(items));
         } else {
             List<FlexItem> current = new ArrayList<>();
             float used = 0f;
             for (FlexItem item : items) {
-                float itemOuter = item.outerBaseMain();
+                float itemOuter = item.outerHypotheticalMain();
                 float needed = current.isEmpty() ? itemOuter : used + mainGap + itemOuter;
                 if (!current.isEmpty() && needed > availableMain + 0.01f) {
                     lines.add(current);
@@ -145,7 +165,7 @@ final class FlexLayout {
             }
         }
 
-        // 3. Resolve flexible lengths (grow / shrink) and lay out each line
+        // 3. Resolve flexible lengths (CSS freeze-and-redistribute loop) and lay out each line
         List<LayoutBox> placedChildren = new ArrayList<>();
         float crossCursor = 0f;
         float maxLineMainUsed = 0f;
@@ -153,50 +173,28 @@ final class FlexLayout {
         for (int lineIdx = 0; lineIdx < lines.size(); lineIdx++) {
             List<FlexItem> line = lines.get(lineIdx);
             float totalGaps = line.size() > 1 ? mainGap * (line.size() - 1) : 0f;
-            float sumBaseOuter = 0f;
-            for (FlexItem item : line) sumBaseOuter += item.outerBaseMain();
 
             if (availableMain != null) {
-                float freeSpace = availableMain - sumBaseOuter - totalGaps;
-                if (freeSpace > 0.01f) {
-                    float totalGrow = 0f;
-                    for (FlexItem item : line) totalGrow += item.style.flex().flexGrow();
-                    if (totalGrow > 0f) {
-                        for (FlexItem item : line) {
-                            float g = item.style.flex().flexGrow();
-                            if (g > 0f) {
-                                item.targetMainSize = item.baseMainSize + (freeSpace * (g / totalGrow));
-                            }
-                        }
-                    }
-                } else if (freeSpace < -0.01f) {
-                    float overflow = -freeSpace;
-                    float totalScaledShrink = 0f;
-                    for (FlexItem item : line) {
-                        totalScaledShrink += item.style.flex().flexShrink() * Math.max(1f, item.baseMainSize);
-                    }
-                    if (totalScaledShrink > 0f) {
-                        for (FlexItem item : line) {
-                            float scaled = item.style.flex().flexShrink() * Math.max(1f, item.baseMainSize);
-                            float delta = overflow * (scaled / totalScaledShrink);
-                            item.targetMainSize = Math.max(item.minMainSize, item.baseMainSize - delta);
-                        }
-                    }
-                }
+                resolveFlexibleLengths(line, availableMain - totalGaps);
             }
 
-            // Lay out each item at (0, 0) with its resolved main size to discover cross size
+            // Lay out each item at (0, 0) with its resolved main size
             float lineCrossSize = 0f;
             for (FlexItem item : line) {
+                FlexProps.AlignItems effectiveAlign = resolveItemAlignment(item.style.flex().alignSelf(), flex.alignItems());
                 LayoutNode sizedNode = withFixedMainSize(item.node, isRow, item.targetMainSize);
-                float childContainingW = isRow
-                        ? item.targetMainSize + item.style.margin().horizontal()
-                        : contentWidth;
+                Float childContainingW;
+                if (isRow) {
+                    childContainingW = item.targetMainSize + item.style.margin().horizontal();
+                } else {
+                    // Column flex item: stretch if align is STRETCH (and container width is definite), else shrink-to-fit!
+                    boolean stretchWidth = (effectiveAlign == FlexProps.AlignItems.STRETCH && explicitContentWidth != null);
+                    childContainingW = stretchWidth ? explicitContentWidth : null;
+                }
                 item.laidOutBox = engine.layoutNodeAtOrigin(sizedNode, childContainingW, fonts);
                 if (!isRow && item.style.height() == null && item.style.flex().flexBasis() == null
                         && item.style.flex().flexGrow() == 0f) {
-                    // For auto-height column items, update targetMainSize to actual laid-out height
-                    item.targetMainSize = item.laidOutBox.borderBox().height();
+                    item.targetMainSize = clamp(item.laidOutBox.borderBox().height(), item.minMainSize, item.maxMainSize);
                 }
                 lineCrossSize = Math.max(lineCrossSize, item.outerCrossSize(isRow));
             }
@@ -205,8 +203,8 @@ final class FlexLayout {
             if (lines.size() == 1) {
                 if (isRow && explicitContentHeight != null) {
                     lineCrossSize = Math.max(lineCrossSize, explicitContentHeight);
-                } else if (!isRow) {
-                    lineCrossSize = Math.max(lineCrossSize, contentWidth);
+                } else if (!isRow && explicitContentWidth != null) {
+                    lineCrossSize = Math.max(lineCrossSize, explicitContentWidth);
                 }
             }
 
@@ -301,6 +299,19 @@ final class FlexLayout {
             }
         }
 
+        if (!definiteWidth) {
+            float contentW = isRow ? maxLineMainUsed : crossCursor;
+            borderBoxWidth = border.horizontal() + padding.horizontal() + contentW;
+            if (style.maxWidth() != null && !style.maxWidth().isPercent()) {
+                float maxW = style.maxWidth().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, 0f);
+                borderBoxWidth = Math.min(borderBoxWidth, style.borderBox() ? maxW : maxW + padding.horizontal() + border.horizontal());
+            }
+            if (style.minWidth() != null && !style.minWidth().isPercent()) {
+                float minW = style.minWidth().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, 0f);
+                borderBoxWidth = Math.max(borderBoxWidth, style.borderBox() ? minW : minW + padding.horizontal() + border.horizontal());
+            }
+        }
+
         float contentHeight = isRow ? crossCursor : maxLineMainUsed;
         float borderBoxHeight = engine.resolveBorderBoxHeight(style, contentHeight, padding, border);
 
@@ -315,10 +326,71 @@ final class FlexLayout {
         );
     }
 
+    /**
+     * CSS Flexbox §9.7 Resolve the Flexible Lengths with freeze-and-redistribute for min/max clamping.
+     */
+    private void resolveFlexibleLengths(List<FlexItem> line, float availableSpace) {
+        float initialSum = 0f;
+        for (FlexItem item : line) initialSum += item.outerHypotheticalMain();
+        boolean growing = initialSum < availableSpace;
+
+        for (FlexItem item : line) {
+            float factor = growing ? item.style.flex().flexGrow() : item.style.flex().flexShrink();
+            if (factor <= 0f) {
+                item.frozen = true;
+                item.targetMainSize = clamp(item.baseMainSize, item.minMainSize, item.maxMainSize);
+            } else {
+                item.frozen = false;
+                item.targetMainSize = item.baseMainSize;
+            }
+        }
+
+        for (int iter = 0; iter < line.size() + 2; iter++) {
+            float usedFrozen = 0f;
+            float usedUnfrozen = 0f;
+            float totalFactor = 0f;
+            int unfrozenCount = 0;
+
+            for (FlexItem item : line) {
+                if (item.frozen) {
+                    usedFrozen += item.outerTargetMain();
+                } else {
+                    usedUnfrozen += item.baseMainSize + item.mainMarginStart + item.mainMarginEnd;
+                    totalFactor += growing
+                            ? item.style.flex().flexGrow()
+                            : (item.style.flex().flexShrink() * Math.max(1f, item.baseMainSize));
+                    unfrozenCount++;
+                }
+            }
+            if (unfrozenCount == 0 || totalFactor <= 0f) break;
+
+            float remainingFree = availableSpace - usedFrozen - usedUnfrozen;
+            if (Math.abs(remainingFree) < 0.01f) break;
+
+            boolean anyViolation = false;
+            for (FlexItem item : line) {
+                if (item.frozen) continue;
+                float share = growing
+                        ? (item.style.flex().flexGrow() / totalFactor)
+                        : ((item.style.flex().flexShrink() * Math.max(1f, item.baseMainSize)) / totalFactor);
+                float proposed = item.baseMainSize + (remainingFree * share);
+                float clamped = clamp(proposed, item.minMainSize, item.maxMainSize);
+                if (Math.abs(clamped - proposed) > 0.01f) {
+                    item.targetMainSize = clamped;
+                    item.frozen = true;
+                    anyViolation = true;
+                } else {
+                    item.targetMainSize = proposed;
+                }
+            }
+            if (!anyViolation) break;
+        }
+    }
+
     private float computeHypotheticalMainSize(
             LayoutNode child,
             boolean isRow,
-            float containerContentWidth,
+            Float containerContentWidth,
             Float availableMain,
             FontRegistry.LoadedFonts fonts
     ) {
@@ -326,35 +398,60 @@ final class FlexLayout {
         Edges p = s.padding();
         Edges b = s.border();
         float mainPadBorder = isRow ? (p.horizontal() + b.horizontal()) : (p.vertical() + b.vertical());
-        float pctBase = availableMain != null ? availableMain : containerContentWidth;
+        float pctBase = availableMain != null ? availableMain : (containerContentWidth != null ? containerContentWidth : 0f);
 
         CssLength basis = s.flex().flexBasis();
         if (basis != null && !basis.isAuto()) {
-            float raw = basis.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
-            return s.borderBox() ? raw : raw + mainPadBorder;
+            if (!basis.isPercent() || availableMain != null) {
+                float raw = basis.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+                return s.borderBox() ? raw : raw + mainPadBorder;
+            }
         }
 
         CssLength explicit = isRow ? s.width() : s.height();
         if (explicit != null && !explicit.isAuto()) {
-            float raw = explicit.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
-            return s.borderBox() ? raw : raw + mainPadBorder;
+            if (!explicit.isPercent() || availableMain != null) {
+                float raw = explicit.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+                return s.borderBox() ? raw : raw + mainPadBorder;
+            }
         }
 
         if (isRow) {
-            // Measure intrinsic max-content width (clamped to container content width)
-            float intrinsic = engine.measureMaxContentWidth(child, containerContentWidth, fonts);
-            return Math.min(intrinsic, containerContentWidth);
+            float intrinsic = engine.measureMaxContentWidth(child, containerContentWidth != null ? containerContentWidth : 800f, fonts);
+            return containerContentWidth != null ? Math.min(intrinsic, containerContentWidth) : intrinsic;
         } else {
-            // Measure intrinsic height by laying out at container content width
             LayoutBox measured = engine.layoutNodeAtOrigin(child, containerContentWidth, fonts);
             return measured.borderBox().height();
         }
     }
 
-    private float resolveMinMainSize(LayoutStyle s, boolean isRow, float pctBase) {
+    private float resolveMinMainSize(LayoutNode child, boolean isRow, float pctBase, float baseMain) {
+        LayoutStyle s = child.style();
         CssLength minLen = isRow ? s.minWidth() : s.minHeight();
-        if (minLen == null || minLen.isAuto()) return 0f;
-        return Math.max(0f, minLen.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase));
+        if (minLen != null && !minLen.isAuto()) {
+            float raw = minLen.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+            float padBorder = isRow ? (s.padding().horizontal() + s.border().horizontal()) : (s.padding().vertical() + s.border().vertical());
+            return Math.max(0f, s.borderBox() ? raw : raw + padBorder);
+        }
+        // CSS Flexbox §4.5 automatic minimum size when overflow is visible and main dimension is auto
+        boolean mainIsAuto = (isRow ? s.width() == null : s.height() == null)
+                && (s.flex().flexBasis() == null || s.flex().flexBasis().isAuto());
+        if (mainIsAuto && !s.overflowHidden() && !child.children().isEmpty() && s.flex().flexGrow() == 0f) {
+            return baseMain;
+        }
+        return 0f;
+    }
+
+    private float resolveMaxMainSize(LayoutStyle s, boolean isRow, float pctBase) {
+        if (!isRow) return Float.POSITIVE_INFINITY;
+        CssLength maxLen = s.maxWidth();
+        if (maxLen == null || maxLen.isAuto()) return Float.POSITIVE_INFINITY;
+        float raw = maxLen.toPx(s.fontSizePx(), ROOT_FONT_SIZE_PX, pctBase);
+        return s.borderBox() ? raw : raw + s.padding().horizontal() + s.border().horizontal();
+    }
+
+    private static float clamp(float val, float min, float max) {
+        return Math.max(min, Math.min(max, val));
     }
 
     private static FlexProps.AlignItems resolveItemAlignment(FlexProps.AlignSelf self, FlexProps.AlignItems containerDefault) {
@@ -377,7 +474,7 @@ final class FlexLayout {
             return new LayoutNode(node.id(), updated, node.text(), node.imageBytes(), node.linkHref(), node.children());
         } else {
             if (s.height() == null && s.flex().flexBasis() == null && s.flex().flexGrow() == 0f) {
-                return node; // keep auto height
+                return node;
             }
             float h = s.borderBox()
                     ? borderBoxMainSize

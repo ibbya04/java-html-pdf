@@ -739,8 +739,8 @@ public final class StyleResolver {
         if (raw == null) return FlexProps.AlignSelf.AUTO;
         return switch (raw.trim().toLowerCase(Locale.ROOT)) {
             case "stretch" -> FlexProps.AlignSelf.STRETCH;
-            case "flex-start", "start" -> FlexProps.AlignSelf.FLEX_START;
-            case "flex-end", "end" -> FlexProps.AlignSelf.FLEX_END;
+            case "flex-start", "start", "self-start" -> FlexProps.AlignSelf.FLEX_START;
+            case "flex-end", "end", "self-end" -> FlexProps.AlignSelf.FLEX_END;
             case "center" -> FlexProps.AlignSelf.CENTER;
             default -> FlexProps.AlignSelf.AUTO;
         };
