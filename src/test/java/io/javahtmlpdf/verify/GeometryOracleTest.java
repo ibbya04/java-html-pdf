@@ -20,7 +20,10 @@ class GeometryOracleTest {
                 "/fixtures/geometry/flex-grow-gap.json",
                 "/fixtures/geometry/flex-shrink.json",
                 "/fixtures/geometry/flex-wrap.json",
-                "/fixtures/geometry/flex-column.json"
+                "/fixtures/geometry/flex-column.json",
+                "/fixtures/geometry/grid-equal-cols.json",
+                "/fixtures/geometry/grid-mixed-tracks.json",
+                "/fixtures/geometry/grid-span.json"
         );
         GeometryOracle.SuiteReport report = oracle.runSuite(fixtures, new LayoutEngine());
 

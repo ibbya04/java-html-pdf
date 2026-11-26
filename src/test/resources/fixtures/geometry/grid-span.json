@@ -1,0 +1,31 @@
+{
+  "name": "grid-repeat-and-column-span",
+  "viewportWidth": 620,
+  "tolerance": 0.5,
+  "root": {
+    "id": "grid",
+    "style": {
+      "display": "grid",
+      "gridTemplateColumns": "repeat(3, 1fr)",
+      "gap": 10
+    },
+    "expected": { "x": 0, "y": 0, "width": 620, "height": 130 },
+    "children": [
+      {
+        "id": "span2",
+        "style": { "display": "block", "gridColSpan": 2, "height": 50 },
+        "expected": { "x": 0, "y": 0, "width": 410, "height": 50 }
+      },
+      {
+        "id": "right",
+        "style": { "display": "block", "height": 50 },
+        "expected": { "x": 420, "y": 0, "width": 200, "height": 50 }
+      },
+      {
+        "id": "full",
+        "style": { "display": "block", "gridColSpan": 3, "height": 70 },
+        "expected": { "x": 0, "y": 60, "width": 620, "height": 70 }
+      }
+    ]
+  }
+}

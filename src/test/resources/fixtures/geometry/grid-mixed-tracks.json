@@ -1,0 +1,31 @@
+{
+  "name": "grid-mixed-fixed-and-fr-tracks",
+  "viewportWidth": 520,
+  "tolerance": 0.5,
+  "root": {
+    "id": "grid",
+    "style": {
+      "display": "grid",
+      "gridTemplateColumns": "100px 1fr 2fr",
+      "columnGap": 10
+    },
+    "expected": { "x": 0, "y": 0, "width": 520, "height": 60 },
+    "children": [
+      {
+        "id": "sidebar",
+        "style": { "display": "block", "height": 60 },
+        "expected": { "x": 0, "y": 0, "width": 100, "height": 60 }
+      },
+      {
+        "id": "mid",
+        "style": { "display": "block", "height": 60 },
+        "expected": { "x": 110, "y": 0, "width": 133.33, "height": 60 }
+      },
+      {
+        "id": "wide",
+        "style": { "display": "block", "height": 60 },
+        "expected": { "x": 253.33, "y": 0, "width": 266.67, "height": 60 }
+      }
+    ]
+  }
+}

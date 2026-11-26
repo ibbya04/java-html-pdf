@@ -307,6 +307,119 @@ class VisualDiffBenchmarkTest {
         }
     }
 
+    @Test
+    void gridLayoutMatchesHeadlessChrome() throws Exception {
+        VisualDiffBenchmark benchmark = new VisualDiffBenchmark();
+        Assumptions.assumeTrue(
+                benchmark.findChromeBinary().isPresent(),
+                "Skipping Tier 3 visual diff: Chrome/Chromium not installed"
+        );
+
+        byte[] ttfBytes;
+        try (InputStream in = getClass().getResourceAsStream("/org/apache/pdfbox/resources/ttf/LiberationSans-Regular.ttf")) {
+            Assumptions.assumeTrue(in != null, "Bundled LiberationSans-Regular.ttf not found");
+            ttfBytes = in.readAllBytes();
+        }
+        String fontBase64 = Base64.getEncoder().encodeToString(ttfBytes);
+
+        String html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                  <meta charset="utf-8" />
+                  <style>
+                    @page { size: A4; margin: 48px; }
+                    @font-face {
+                      font-family: 'LibSans';
+                      src: url('data:font/ttf;base64,%s') format('truetype');
+                    }
+                    * { box-sizing: border-box; }
+                    body { margin: 0; font-family: 'LibSans', sans-serif; font-size: 13px; color: #1f2937; background: #fff; }
+                    .grid {
+                      display: grid;
+                      grid-template-columns: repeat(3, 1fr);
+                      gap: 16px;
+                    }
+                    .card {
+                      padding: 16px;
+                      border: 1px solid #d1d5db;
+                      border-radius: 8px;
+                      background: #f9fafb;
+                    }
+                    .wide {
+                      grid-column: span 2;
+                      background: #eff6ff;
+                      border-color: #93c5fd;
+                    }
+                    .full {
+                      grid-column: span 3;
+                      background: #f0fdf4;
+                      border-color: #86efac;
+                    }
+                    h3 { margin: 0 0 6px 0; font-size: 15px; font-weight: normal; color: #111827; }
+                    p { margin: 0; color: #4b5563; line-height: 1.45; }
+                  </style>
+                </head>
+                <body>
+                  <div class="grid">
+                    <div class="card wide">
+                      <h3>Featured Summary (span 2)</h3>
+                      <p>CSS Grid allocates 2 fractional columns and stretches sibling cards to identical row heights automatically.</p>
+                    </div>
+                    <div class="card">
+                      <h3>Side Metric</h3>
+                      <p>99.4%% accuracy</p>
+                    </div>
+                    <div class="card">
+                      <h3>Col 1</h3>
+                      <p>First equal column.</p>
+                    </div>
+                    <div class="card">
+                      <h3>Col 2</h3>
+                      <p>Second equal column.</p>
+                    </div>
+                    <div class="card">
+                      <h3>Col 3</h3>
+                      <p>Third equal column.</p>
+                    </div>
+                    <div class="card full">
+                      <h3>Full-Width Footer Banner (span 3)</h3>
+                      <p>Spans all three grid tracks cleanly across the page width.</p>
+                    </div>
+                  </div>
+                </body>
+                </html>
+                """.formatted(fontBase64);
+
+        Path tempHtml = Files.createTempFile("grid-benchmark-", ".html");
+        try {
+            Files.writeString(tempHtml, html, StandardCharsets.UTF_8);
+            byte[] chromePdf = benchmark.renderWithChrome(tempHtml);
+
+            RenderResult actual = HtmlToPdf.builder()
+                    .html(html)
+                    .pageSize(PageSize.A4)
+                    .font("LibSans", false, false, ttfBytes)
+                    .render();
+
+            VisualDiffBenchmark.BenchmarkReport report =
+                    benchmark.comparePdfs("grid-benchmark", chromePdf, actual.pdfBytes());
+
+            System.out.printf("Phase 2B Visual Diff Benchmark (grid-benchmark): %.2f%% pixel similarity (diff: %s)%n",
+                    report.averageSimilarityPercent(), report.pages().getFirst().diffImage());
+
+            assertEquals(1, report.referencePages());
+            assertEquals(1, report.actualPages());
+            assertTrue(
+                    report.averageSimilarityPercent() >= 96.0,
+                    () -> String.format("Expected >= 96.0%% visual similarity with Chrome, got %.2f%% (diff: %s)",
+                            report.averageSimilarityPercent(), report.pages().getFirst().diffImage())
+            );
+        } finally {
+            Files.deleteIfExists(tempHtml);
+        }
+    }
+
     private static String createBannerPhotoBase64(int w, int h) throws Exception {
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = img.createGraphics();

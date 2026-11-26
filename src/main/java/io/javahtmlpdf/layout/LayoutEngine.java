@@ -29,6 +29,7 @@ public class LayoutEngine {
 
     private static final float ROOT_FONT_SIZE_PX = 16f;
     private final FlexLayout flexLayout = new FlexLayout(this);
+    private final GridLayout gridLayout = new GridLayout(this);
 
     public LayoutBox layout(LayoutNode root, float viewportWidthPx) {
         return layout(root, viewportWidthPx, 0f, 0f, null);
@@ -64,6 +65,9 @@ public class LayoutEngine {
         }
         if (display == Display.FLEX) {
             return flexLayout.layout(node, originX, originY, containingWidth, fonts);
+        }
+        if (display == Display.GRID) {
+            return gridLayout.layout(node, originX, originY, containingWidth, fonts);
         }
         return layoutBlock(node, originX, originY, containingWidth, fonts);
     }
