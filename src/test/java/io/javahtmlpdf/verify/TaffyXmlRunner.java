@@ -184,8 +184,8 @@ public final class TaffyXmlRunner {
             if ("direction".equals(name) && !"ltr".equals(val)) {
                 return "direction:" + val;
             }
-            if ("flex-wrap".equals(name) && "wrap-reverse".equals(val)) {
-                return "flex-wrap:wrap-reverse";
+            if ("flex-wrap".equals(name) && ("wrap-reverse".equals(val) || "balance".equals(val))) {
+                return "flex-wrap:" + val;
             }
             if ("align-items".equals(name) && "baseline".equals(val)) {
                 return "align-items:baseline";

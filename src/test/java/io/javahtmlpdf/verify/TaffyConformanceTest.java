@@ -25,8 +25,8 @@ class TaffyConformanceTest {
     void bundledTaffyGridFixturesPass100Percent() throws Exception {
         Path gridDir = Path.of(getClass().getResource("/fixtures/taffy/grid").toURI());
         TaffyXmlRunner.SuiteStats stats = new TaffyXmlRunner().runDirectory("Bundled Taffy Grid", gridDir);
-        assertEquals(8, stats.tested());
+        assertEquals(10, stats.tested());
         assertTrue(stats.sampleFailures().isEmpty(), () -> "Taffy Grid failures:\n" + String.join("\n", stats.sampleFailures()));
-        assertEquals(8, stats.passed());
+        assertEquals(10, stats.passed());
     }
 }

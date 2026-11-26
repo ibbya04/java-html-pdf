@@ -339,20 +339,28 @@ final class GridLayout {
                 if (needed <= 0f) continue;
                 float current = sumRange(widths, item.col, item.colSpan) + colGap * (item.colSpan - 1);
                 if (needed > current) {
-                    List<Integer> eligible = new ArrayList<>();
+                    List<Integer> flexEligible = new ArrayList<>();
+                    List<Integer> nonFlexEligible = new ArrayList<>();
+                    float sumFlex = 0f;
                     for (int c = item.col; c < Math.min(n, item.col + item.colSpan); c++) {
-                        GridProps.GridTrack.Kind k = tracks.get(c).kind();
-                        if (k == GridProps.GridTrack.Kind.AUTO || k == GridProps.GridTrack.Kind.FR) {
-                            eligible.add(c);
+                        GridProps.GridTrack tr = tracks.get(c);
+                        if (tr.kind() == GridProps.GridTrack.Kind.FR && tr.value() > 0f) {
+                            flexEligible.add(c);
+                            sumFlex += tr.value();
+                        } else if (tr.kind() == GridProps.GridTrack.Kind.AUTO || tr.kind() == GridProps.GridTrack.Kind.FR) {
+                            nonFlexEligible.add(c);
                         }
                     }
-                    if (!eligible.isEmpty()) {
-                        float extra = (needed - current) / eligible.size();
-                        for (int c : eligible) {
+                    float delta = needed - current;
+                    if (!flexEligible.isEmpty() && sumFlex > 0f) {
+                        for (int c : flexEligible) {
+                            widths[c] += delta * (tracks.get(c).value() / sumFlex);
+                        }
+                    } else if (!nonFlexEligible.isEmpty()) {
+                        float extra = delta / nonFlexEligible.size();
+                        for (int c : nonFlexEligible) {
                             widths[c] += extra;
-                            if (tracks.get(c).kind() != GridProps.GridTrack.Kind.FR || tracks.get(c).value() == 0f) {
-                                fixedAndAutoSum += extra;
-                            }
+                            fixedAndAutoSum += extra;
                         }
                     }
                 }
@@ -466,19 +474,34 @@ final class GridLayout {
             }
         }
 
-        // Multi-row spanning items distribute needed height across eligible intrinsic-min rows (AUTO / bare FR)
+        // Multi-row spanning items distribute needed height across eligible intrinsic-min rows (weighted by FR when present)
         for (PlacedItem item : placed) {
             if (item.rowSpan > 1) {
                 float needed = item.box.borderBox().height() + item.node.style().margin().vertical();
                 float current = sumRange(heights, item.row, item.rowSpan) + rowGap * (item.rowSpan - 1);
                 if (needed > current) {
-                    List<Integer> eligible = new ArrayList<>();
+                    List<Integer> flexEligible = new ArrayList<>();
+                    List<Integer> nonFlexEligible = new ArrayList<>();
+                    float sumFlex = 0f;
                     for (int r = item.row; r < Math.min(numRows, item.row + item.rowSpan); r++) {
-                        if (!explicit[r]) eligible.add(r);
+                        if (explicit[r]) continue;
+                        if (r < rowTracks.size()
+                                && rowTracks.get(r).kind() == GridProps.GridTrack.Kind.FR
+                                && rowTracks.get(r).value() > 0f) {
+                            flexEligible.add(r);
+                            sumFlex += rowTracks.get(r).value();
+                        } else {
+                            nonFlexEligible.add(r);
+                        }
                     }
-                    if (!eligible.isEmpty()) {
-                        float extra = (needed - current) / eligible.size();
-                        for (int r : eligible) heights[r] += extra;
+                    float delta = needed - current;
+                    if (!flexEligible.isEmpty() && sumFlex > 0f) {
+                        for (int r : flexEligible) {
+                            heights[r] += delta * (rowTracks.get(r).value() / sumFlex);
+                        }
+                    } else if (!nonFlexEligible.isEmpty()) {
+                        float extra = delta / nonFlexEligible.size();
+                        for (int r : nonFlexEligible) heights[r] += extra;
                     }
                 }
             }

@@ -242,8 +242,22 @@ final class FlexLayout {
                 if (item.mainMarginStartAuto) mainAutoMargins++;
                 if (item.mainMarginEndAuto) mainAutoMargins++;
             }
-            float remainingMain = availableMain != null ? (availableMain - sumFinalOuter - totalGaps) : 0f;
-            maxLineMainUsed = Math.max(maxLineMainUsed, sumFinalOuter + totalGaps);
+            float lineContentMain = sumFinalOuter + totalGaps;
+            float containerMinMain = 0f;
+            if (isRow && style.minWidth() != null && !style.minWidth().isPercent()) {
+                float rawMin = style.minWidth().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, 0f);
+                float bbMin = style.borderBox() ? rawMin : rawMin + padding.horizontal() + border.horizontal();
+                containerMinMain = Math.max(0f, bbMin - padding.horizontal() - border.horizontal());
+            } else if (!isRow && style.minHeight() != null && !style.minHeight().isPercent()) {
+                float rawMin = style.minHeight().toPx(style.fontSizePx(), ROOT_FONT_SIZE_PX, 0f);
+                float bbMin = style.borderBox() ? rawMin : rawMin + padding.vertical() + border.vertical();
+                containerMinMain = Math.max(0f, bbMin - padding.vertical() - border.vertical());
+            }
+            float effectiveMain = availableMain != null
+                    ? Math.max(availableMain, containerMinMain)
+                    : Math.max(lineContentMain, containerMinMain);
+            float remainingMain = effectiveMain - lineContentMain;
+            maxLineMainUsed = Math.max(maxLineMainUsed, Math.max(lineContentMain, containerMinMain));
 
             float autoMarginSpace = (mainAutoMargins > 0 && remainingMain > 0f) ? (remainingMain / mainAutoMargins) : 0f;
             float justifyRemaining = (mainAutoMargins > 0 && remainingMain > 0f) ? 0f : remainingMain;
